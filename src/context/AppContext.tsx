@@ -239,6 +239,23 @@ export function AppProvider({ children }: { children: ReactNode }) {
 
   const removeBlockingPoint = (pointId: string) => {
     setBlockingPoints((prev) => prev.filter((p) => p.id !== pointId))
+
+    // 卡点ID格式: mat-{materialId}-{timestamp}
+    // 如果是材料相关的卡点，恢复对应材料的状态
+    if (pointId.startsWith('mat-')) {
+      const parts = pointId.split('-')
+      // parts: ['mat', materialId, timestamp...]
+      // materialId 可能是带破折号的（如 'cp1-1'），所以需要重新组合
+      const matParts = parts.slice(1, parts.length - 1) // 去掉 'mat' 和最后的 timestamp
+      const materialId = matParts.join('-') || parts[1] // fallback
+      setMaterials((prev) =>
+        prev.map((m) =>
+          m.id === materialId
+            ? { ...m, status: 'pending', problem: undefined, sharedTime: m.sharedTime }
+            : m
+        )
+      )
+    }
   }
 
   const updateMaterialStatus = (

@@ -298,8 +298,24 @@ function ResultReceipt() {
   }
 
   const displayMaterials = generated ? getDisplayMaterials() : []
-  const canGenerateReject =
-    receiptType !== 'reject' || getDisplayMaterials().length > 0
+
+  // 补正告知单必须至少有一项补正
+  const correctionCount = () => {
+    const selected = receiptDraft?.correctionItems.filter((c) => c.selected).length || 0
+    const custom = receiptDraft?.customCorrections.length || 0
+    return selected + custom
+  }
+  const canGenerateCorrection = receiptType !== 'correction' || correctionCount() > 0
+
+  // 不予受理必须至少有一个原因
+  const rejectReasonCount = () => {
+    const selected = receiptDraft?.rejectReasons.filter((r) => r.selected).length || 0
+    const custom = (receiptDraft?.customRejectReason?.trim() || '').length > 0 ? 1 : 0
+    return selected + custom
+  }
+  const canGenerateReject = receiptType !== 'reject' || rejectReasonCount() > 0
+
+  const canGenerate = canGenerateCorrection && canGenerateReject
 
   // 未选择事项时的提示
   if (!currentService) {
@@ -509,12 +525,22 @@ function ResultReceipt() {
               />
             </div>
 
-            {!canGenerateReject && (
+            {receiptType === 'reject' && !canGenerateReject && (
               <div className="mt-3 p-2 rounded-lg bg-amber-50 border border-amber-200 flex items-start space-x-2">
                 <AlertTriangle className="w-4 h-4 text-amber-500 mt-0.5 flex-shrink-0" />
                 <span className="text-xs text-amber-700">请至少选择或录入一项不予受理原因</span>
               </div>
             )}
+          </div>
+        )}
+
+        {/* 补正告知单 - 空补正提示 */}
+        {receiptType === 'correction' && !canGenerateCorrection && (
+          <div className="bg-white rounded-xl border border-slate-200 shadow-sm p-4 mb-4">
+            <div className="p-3 rounded-lg bg-amber-50 border border-amber-200 flex items-start space-x-2">
+              <AlertTriangle className="w-4 h-4 text-amber-500 mt-0.5 flex-shrink-0" />
+              <span className="text-xs text-amber-700">补正告知单至少需要一项补正内容，请在上方勾选或添加</span>
+            </div>
           </div>
         )}
 
@@ -539,9 +565,9 @@ function ResultReceipt() {
         {/* 生成按钮 */}
         <button
           onClick={handleGenerate}
-          disabled={!canGenerateReject}
+          disabled={!canGenerate}
           className={`w-full py-4 rounded-xl font-medium transition-all flex items-center justify-center space-x-2 ${
-            canGenerateReject
+            canGenerate
               ? 'bg-gradient-to-r from-blue-500 to-blue-600 text-white hover:shadow-lg hover:shadow-blue-500/30'
               : 'bg-slate-200 text-slate-400 cursor-not-allowed'
           }`}

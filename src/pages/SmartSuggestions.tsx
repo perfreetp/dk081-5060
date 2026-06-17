@@ -18,6 +18,8 @@ import {
   AlertOctagon,
   ArrowLeftRight,
   X,
+  RefreshCw,
+  FileCheck,
 } from 'lucide-react'
 import { useAppContext } from '../context/AppContext'
 import {
@@ -192,7 +194,18 @@ function SmartSuggestions() {
   const passCount = blockingPoints.filter((bp) => bp.level === 'info').length
   const manualCount = blockingPoints.filter((bp) => bp.suggestionType === 'manual').length
   const correctionCount = blockingPoints.filter((bp) => bp.suggestionType === 'correction').length
+  const rejectCount = blockingPoints.filter((bp) => bp.suggestionType === 'reject').length
   const suggestionInfo = getSuggestionTypeInfo(suggestionType)
+
+  // 秒批通过时：真正通过的才叫秒批通过，没有任何非 info 级卡点
+  const isTrueSecondsPass =
+    runSecondsApproval && blockingPoints.length > 0 && blockingPoints.every((bp) => bp.level === 'info')
+
+  // 有任何内容就显示明细区域（卡点或检测通过项）
+  const hasAnyContent = blockingPoints.length > 0
+
+  // 有需操作的卡点（非 info 级）
+  const hasActionablePoints = blockingPoints.some((bp) => bp.level !== 'info')
 
   if (!currentService) {
     return (
@@ -238,7 +251,7 @@ function SmartSuggestions() {
             </div>
           </div>
 
-          {!runSecondsApproval ? (
+          {!hasAnyContent ? (
             <div className="p-8 text-center">
               <Lightbulb className="w-16 h-16 mx-auto mb-4 text-amber-400" />
               <p className="text-slate-600 mb-2">点击下方按钮开始秒批智能检测</p>
@@ -255,8 +268,25 @@ function SmartSuggestions() {
             </div>
           ) : (
             <div className="p-5">
-              {/* 最终建议卡片 */}
-              {suggestionInfo && (
+              {/* 秒批通过提示卡 */}
+              {isTrueSecondsPass && (
+                <div className="mb-5 p-5 rounded-xl border-2 bg-green-50 border-green-200">
+                  <div className="flex items-start space-x-4">
+                    <div className="w-12 h-12 rounded-xl bg-green-500 flex items-center justify-center flex-shrink-0">
+                      <Zap className="w-6 h-6 text-white" />
+                    </div>
+                    <div className="flex-1">
+                      <div className="flex items-center space-x-2 mb-1">
+                        <span className="text-lg font-bold text-green-700">秒批通过</span>
+                      </div>
+                      <p className="text-sm text-green-700">所有核验点通过，可直接秒批</p>
+                    </div>
+                  </div>
+                </div>
+              )}
+
+              {/* 最终建议卡片（非秒批通过场景） */}
+              {suggestionInfo && !isTrueSecondsPass && (
                 <div
                   className={`mb-5 p-5 rounded-xl border-2 ${suggestionInfo.lightBg} ${suggestionInfo.border}`}
                 >
@@ -281,28 +311,39 @@ function SmartSuggestions() {
                 </div>
               )}
 
-              {/* 检测结果统计 */}
-              <div className="grid grid-cols-3 gap-4 mb-5">
-                <div className="text-center p-4 bg-green-50 rounded-xl">
-                  <div className="text-2xl font-bold text-green-600">{passCount}</div>
-                  <div className="text-sm text-green-700 mt-1">通过项</div>
+              {/* 检测结果统计（只有真的跑过秒批才显示所有统计） */}
+              {runSecondsApproval && (
+                <div className="grid grid-cols-4 gap-3 mb-5">
+                  <div className="text-center p-3 bg-green-50 rounded-xl">
+                    <div className="text-xl font-bold text-green-600">{passCount}</div>
+                    <div className="text-xs text-green-700 mt-1">通过</div>
+                  </div>
+                  <div className="text-center p-3 bg-amber-50 rounded-xl">
+                    <div className="text-xl font-bold text-amber-600">{correctionCount}</div>
+                    <div className="text-xs text-amber-700 mt-1">可补正</div>
+                  </div>
+                  <div className="text-center p-3 bg-blue-50 rounded-xl">
+                    <div className="text-xl font-bold text-blue-600">{manualCount}</div>
+                    <div className="text-xs text-blue-700 mt-1">转人工</div>
+                  </div>
+                  <div className="text-center p-3 bg-red-50 rounded-xl">
+                    <div className="text-xl font-bold text-red-600">{rejectCount}</div>
+                    <div className="text-xs text-red-700 mt-1">不受理</div>
+                  </div>
                 </div>
-                <div className="text-center p-4 bg-amber-50 rounded-xl">
-                  <div className="text-2xl font-bold text-amber-600">{warningCount}</div>
-                  <div className="text-sm text-amber-700 mt-1">待核实</div>
-                </div>
-                <div className="text-center p-4 bg-red-50 rounded-xl">
-                  <div className="text-2xl font-bold text-red-600">{criticalCount}</div>
-                  <div className="text-sm text-red-700 mt-1">卡点</div>
-                </div>
-              </div>
+              )}
 
-              {/* 卡点详情 */}
+              {/* 卡点详情 - 有卡点就显示，不论是否跑过秒批 */}
               <h3 className="font-medium text-slate-800 mb-3 flex items-center justify-between">
                 <span>卡点明细（合并秒批检测 + 材料登记）</span>
                 {blockingPoints.length > 0 && (
                   <span className="text-xs text-slate-500 font-normal">
                     共 {blockingPoints.length} 项
+                    {runSecondsApproval
+                      ? ` · 检测 ${
+                          blockingPoints.filter((b) => b.source === 'detection').length
+                        } · 人工 ${blockingPoints.filter((b) => b.source === 'manual').length}`
+                      : ` · 人工登记 ${blockingPoints.filter((b) => b.source === 'manual').length} 项`}
                   </span>
                 )}
               </h3>
@@ -323,11 +364,13 @@ function SmartSuggestions() {
                             <span className={`px-2 py-0.5 text-xs rounded ${style.iconColor} bg-white/60`}>
                               {style.label}
                             </span>
-                            <span className={`px-2 py-0.5 text-xs rounded ${
-                              bp.source === 'detection'
-                                ? 'text-purple-600 bg-purple-100'
-                                : 'text-blue-600 bg-blue-100'
-                            }`}>
+                            <span
+                              className={`px-2 py-0.5 text-xs rounded ${
+                                bp.source === 'detection'
+                                  ? 'text-purple-600 bg-purple-100'
+                                  : 'text-blue-600 bg-blue-100'
+                              }`}
+                            >
                               {bp.source === 'detection' ? '系统检测' : '人工登记'}
                             </span>
                             {bp.suggestionType === 'manual' && (
@@ -360,7 +403,7 @@ function SmartSuggestions() {
                         <button
                           onClick={() => removeBlockingPoint(bp.id)}
                           className="p-1 text-slate-400 hover:text-red-500 hover:bg-red-50 rounded transition-colors"
-                          title="移除"
+                          title="移除并恢复材料状态"
                         >
                           <X className="w-4 h-4" />
                         </button>
@@ -369,14 +412,65 @@ function SmartSuggestions() {
                   )
                 })}
                 {blockingPoints.length === 0 && (
-                  <div className="text-center py-8 text-slate-400 text-sm">
-                    暂无卡点
-                  </div>
+                  <div className="text-center py-8 text-slate-400 text-sm">暂无卡点</div>
                 )}
               </div>
+
+              {/* 如果只跑过秒批检测但还没有补正入口，补一个再次检测按钮 */}
+              {runSecondsApproval && (
+                <div className="mt-4 flex items-center justify-center space-x-3">
+                  <button
+                    onClick={handleRunApproval}
+                    className="px-4 py-2 text-sm text-slate-600 bg-slate-100 rounded-lg hover:bg-slate-200 transition-colors flex items-center space-x-1.5"
+                  >
+                    <RefreshCw className="w-4 h-4" />
+                    <span>重新检测</span>
+                  </button>
+                </div>
+              )}
             </div>
           )}
         </div>
+
+        {/* 秒批通过场景 - 只给受理回执入口 */}
+        {isTrueSecondsPass && (
+          <div className="bg-white rounded-xl border border-slate-200 shadow-sm flex-1 overflow-hidden">
+            <div className="p-4 border-b border-slate-100 bg-green-50">
+              <div className="flex items-center justify-between">
+                <h3 className="font-medium text-slate-800 flex items-center space-x-2">
+                  <CheckCircle2 className="w-4 h-4 text-green-500" />
+                  <span>办理路径</span>
+                </h3>
+              </div>
+            </div>
+            <div className="p-4">
+              <div className="p-4 border border-green-200 rounded-xl bg-green-50/30 mb-4">
+                <div className="flex items-center space-x-3">
+                  <div className="w-8 h-8 rounded-full bg-green-100 flex items-center justify-center">
+                    <Zap className="w-4 h-4 text-green-600" />
+                  </div>
+                  <div>
+                    <div className="font-medium text-slate-800">秒批通过路径</div>
+                    <div className="text-sm text-slate-500">
+                      所有核验项通过，直接出具受理回执
+                    </div>
+                  </div>
+                </div>
+              </div>
+
+              <button
+                onClick={() => {
+                  setApprovalResult('seconds')
+                  goToReceipt()
+                }}
+                className="w-full py-3 bg-gradient-to-r from-green-500 to-emerald-500 text-white rounded-xl font-medium hover:shadow-lg hover:shadow-green-500/30 transition-all flex items-center justify-center space-x-2"
+              >
+                <FileCheck className="w-5 h-5" />
+                <span>生成受理回执</span>
+              </button>
+            </div>
+          </div>
+        )}
 
         {/* 补正建议（只要有可补正的卡点就显示） */}
         {correctionCount > 0 && (
@@ -482,32 +576,8 @@ function SmartSuggestions() {
           </div>
         )}
 
-        {/* 秒批通过时的操作 */}
-        {runSecondsApproval && suggestionType === 'seconds' && (
-          <div className="bg-white rounded-xl border border-slate-200 shadow-sm p-5">
-            <div className="text-center">
-              <CheckCircle2 className="w-16 h-16 mx-auto mb-4 text-green-500" />
-              <h3 className="text-lg font-semibold text-slate-800 mb-2">恭喜！秒批通过</h3>
-              <p className="text-slate-600 mb-4">所有核验点均已通过，可直接办理</p>
-              <div className="grid grid-cols-2 gap-3">
-                <button
-                  onClick={goToReceipt}
-                  className="py-3 bg-gradient-to-r from-green-500 to-emerald-500 text-white rounded-xl font-medium hover:shadow-lg hover:shadow-green-500/30 transition-all flex items-center justify-center space-x-2"
-                >
-                  <ClipboardList className="w-4 h-4" />
-                  <span>生成受理回执</span>
-                </button>
-                <button className="py-3 bg-slate-100 text-slate-700 rounded-xl font-medium hover:bg-slate-200 transition-colors flex items-center justify-center space-x-2">
-                  <FileText className="w-4 h-4" />
-                  <span>查看详情</span>
-                </button>
-              </div>
-            </div>
-          </div>
-        )}
-
         {/* 不予受理时的操作 */}
-        {runSecondsApproval && suggestionType === 'reject' && (
+        {rejectCount > 0 && !isTrueSecondsPass && (
           <div className="bg-white rounded-xl border border-slate-200 shadow-sm p-5">
             <div className="text-center">
               <XCircle className="w-16 h-16 mx-auto mb-4 text-red-500" />
