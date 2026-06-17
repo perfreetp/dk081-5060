@@ -1,4 +1,4 @@
-import { useState } from 'react'
+import { useState, useEffect } from 'react'
 import {
   Lightbulb,
   Zap,
@@ -11,43 +11,71 @@ import {
   FileText,
   ThumbsUp,
   ArrowRight,
+  UserX,
+  Users,
+  Edit3,
+  ClipboardList,
 } from 'lucide-react'
-import type { ServiceItem, BlockingPoint } from '../types'
+import { useAppContext } from '../context/AppContext'
+import {
+  approvalRules,
+  generateMockApprovalResult,
+  determineSuggestionType,
+} from '../data/approvalRules'
+import type { BlockingPoint } from '../types'
 
-interface Props {
-  currentService: ServiceItem | null
-}
+type SuggestionType = 'seconds' | 'correction' | 'manual' | 'reject' | null
 
-function SmartSuggestions({ currentService }: Props) {
+function SmartSuggestions() {
+  const {
+    currentService,
+    setBlockingPoints,
+    setCorrectionSuggestions,
+    setApprovalResult,
+    setActiveTab,
+  } = useAppContext()
+
+  const goToReceipt = () => {
+    setActiveTab('receipt')
+  }
   const [expandedScenario, setExpandedScenario] = useState<string | null>(null)
   const [runSecondsApproval, setRunSecondsApproval] = useState(false)
+  const [blockingPoints, setLocalBlockingPoints] = useState<BlockingPoint[]>([])
+  const [suggestionType, setSuggestionType] = useState<SuggestionType>(null)
 
-  const mockBlockingPoints: BlockingPoint[] = [
-    {
-      id: 'bp1',
-      field: '经营场所',
-      reason: '经营场所地址与不动产登记信息不一致',
-      solution: '建议核实地址信息，或补充提供经营场所证明材料',
-      level: 'warning',
-    },
-    {
-      id: 'bp2',
-      field: '经营范围',
-      reason: '经营范围涉及后置审批事项',
-      solution: '需先取得相关部门审批文件后方可办理',
-      level: 'critical',
-    },
-    {
-      id: 'bp3',
-      field: '申请人年龄',
-      reason: '申请人已年满18周岁，符合法定要求',
-      solution: '',
-      level: 'info',
-    },
-  ]
+  // 切换事项时重置检测状态
+  useEffect(() => {
+    setRunSecondsApproval(false)
+    setLocalBlockingPoints([])
+    setSuggestionType(null)
+  }, [currentService])
 
   const handleRunApproval = () => {
+    if (!currentService) return
+
+    // 根据事项ID生成对应的核验结果
+    const points = generateMockApprovalResult(currentService.id)
+    setLocalBlockingPoints(points)
+    setBlockingPoints(points)
+
+    // 确定建议类型
+    const type = determineSuggestionType(points)
+    setSuggestionType(type)
+    setApprovalResult(type)
+
+    // 提取补正建议
+    const suggestions = points
+      .filter((bp) => bp.level !== 'info' && bp.solution)
+      .map((bp) => bp.solution)
+    setCorrectionSuggestions(suggestions)
+
     setRunSecondsApproval(true)
+  }
+
+  const handleGenerateCorrectionNotice = () => {
+    // 保存状态并跳转到结果回执的补正告知单
+    setApprovalResult('correction')
+    goToReceipt()
   }
 
   const getLevelStyle = (level: string) => {
@@ -82,8 +110,59 @@ function SmartSuggestions({ currentService }: Props) {
     }
   }
 
-  const criticalCount = mockBlockingPoints.filter((bp) => bp.level === 'critical').length
-  const warningCount = mockBlockingPoints.filter((bp) => bp.level === 'warning').length
+  const getSuggestionTypeInfo = (type: SuggestionType) => {
+    const typeMap = {
+      seconds: {
+        label: '秒批通过',
+        icon: Zap,
+        bg: 'bg-green-500',
+        text: 'text-green-700',
+        lightBg: 'bg-green-50',
+        border: 'border-green-200',
+        description: '所有核验点通过，可直接秒批',
+      },
+      correction: {
+        label: '材料补正',
+        icon: Edit3,
+        bg: 'bg-amber-500',
+        text: 'text-amber-700',
+        lightBg: 'bg-amber-50',
+        border: 'border-amber-200',
+        description: '存在可补正的问题，建议先补正再受理',
+      },
+      manual: {
+        label: '转人工受理',
+        icon: Users,
+        bg: 'bg-blue-500',
+        text: 'text-blue-700',
+        lightBg: 'bg-blue-50',
+        border: 'border-blue-200',
+        description: '存在需人工核实的情况，建议转人工窗口受理',
+      },
+      reject: {
+        label: '不予受理',
+        icon: UserX,
+        bg: 'bg-red-500',
+        text: 'text-red-700',
+        lightBg: 'bg-red-50',
+        border: 'border-red-200',
+        description: '存在不符合受理条件的问题，建议不予受理',
+      },
+    }
+    return type ? typeMap[type] : null
+  }
+
+  // 获取该事项的核验规则说明
+  const getRuleDescription = () => {
+    if (!currentService) return null
+    const rule = approvalRules.find((r) => r.serviceId === currentService.id)
+    return rule
+  }
+
+  const criticalCount = blockingPoints.filter((bp) => bp.level === 'critical').length
+  const warningCount = blockingPoints.filter((bp) => bp.level === 'warning').length
+  const passCount = blockingPoints.filter((bp) => bp.level === 'info').length
+  const suggestionInfo = getSuggestionTypeInfo(suggestionType)
 
   if (!currentService) {
     return (
@@ -96,6 +175,8 @@ function SmartSuggestions({ currentService }: Props) {
       </div>
     )
   }
+
+  const rule = getRuleDescription()
 
   return (
     <div className="grid grid-cols-12 gap-6 h-full">
@@ -111,7 +192,7 @@ function SmartSuggestions({ currentService }: Props) {
                 </div>
                 <div>
                   <h2 className="text-lg font-semibold text-slate-800">秒批智能检测</h2>
-                  <p className="text-sm text-slate-500">自动识别不符合秒批条件的卡点</p>
+                  <p className="text-sm text-slate-500">{currentService.name}</p>
                 </div>
               </div>
               {currentService.isSecondsApproval ? (
@@ -130,7 +211,10 @@ function SmartSuggestions({ currentService }: Props) {
           {!runSecondsApproval ? (
             <div className="p-8 text-center">
               <Lightbulb className="w-16 h-16 mx-auto mb-4 text-amber-400" />
-              <p className="text-slate-600 mb-4">点击下方按钮开始秒批智能检测</p>
+              <p className="text-slate-600 mb-2">点击下方按钮开始秒批智能检测</p>
+              <p className="text-sm text-slate-500 mb-4">
+                系统将自动核验 <span className="font-medium text-blue-600">{rule?.checkPoints.length || 0}</span> 个核验点
+              </p>
               <button
                 onClick={handleRunApproval}
                 className="px-8 py-3 bg-gradient-to-r from-amber-500 to-orange-500 text-white rounded-xl font-medium hover:shadow-lg hover:shadow-orange-500/30 transition-all flex items-center space-x-2 mx-auto"
@@ -141,12 +225,36 @@ function SmartSuggestions({ currentService }: Props) {
             </div>
           ) : (
             <div className="p-5">
+              {/* 最终建议卡片 */}
+              {suggestionInfo && (
+                <div
+                  className={`mb-5 p-5 rounded-xl border-2 ${suggestionInfo.lightBg} ${suggestionInfo.border}`}
+                >
+                  <div className="flex items-start space-x-4">
+                    <div
+                      className={`w-12 h-12 rounded-xl ${suggestionInfo.bg} flex items-center justify-center flex-shrink-0`}
+                    >
+                      {(() => {
+                        const Icon = suggestionInfo.icon
+                        return <Icon className="w-6 h-6 text-white" />
+                      })()}
+                    </div>
+                    <div className="flex-1">
+                      <div className="flex items-center space-x-2 mb-1">
+                        <span className={`text-lg font-bold ${suggestionInfo.text}`}>
+                          {suggestionInfo.label}
+                        </span>
+                      </div>
+                      <p className={`text-sm ${suggestionInfo.text}`}>{suggestionInfo.description}</p>
+                    </div>
+                  </div>
+                </div>
+              )}
+
               {/* 检测结果统计 */}
               <div className="grid grid-cols-3 gap-4 mb-5">
                 <div className="text-center p-4 bg-green-50 rounded-xl">
-                  <div className="text-2xl font-bold text-green-600">
-                    {mockBlockingPoints.filter((bp) => bp.level === 'info').length}
-                  </div>
+                  <div className="text-2xl font-bold text-green-600">{passCount}</div>
                   <div className="text-sm text-green-700 mt-1">通过项</div>
                 </div>
                 <div className="text-center p-4 bg-amber-50 rounded-xl">
@@ -161,8 +269,8 @@ function SmartSuggestions({ currentService }: Props) {
 
               {/* 卡点详情 */}
               <h3 className="font-medium text-slate-800 mb-3">检测卡点明细</h3>
-              <div className="space-y-3">
-                {mockBlockingPoints.map((bp) => {
+              <div className="space-y-3 max-h-64 overflow-y-auto">
+                {blockingPoints.map((bp) => {
                   const style = getLevelStyle(bp.level)
                   const Icon = style.icon
                   return (
@@ -195,42 +303,32 @@ function SmartSuggestions({ currentService }: Props) {
                   )
                 })}
               </div>
-
-              {/* 处理建议 */}
-              <div className="mt-5 p-4 bg-blue-50 border border-blue-200 rounded-xl">
-                <div className="flex items-start space-x-3">
-                  <Info className="w-5 h-5 text-blue-500 flex-shrink-0 mt-0.5" />
-                  <div>
-                    <p className="text-sm text-blue-800 font-medium">受理建议</p>
-                    <p className="text-sm text-blue-700 mt-1">
-                      该申请存在 {criticalCount} 项不符合秒批条件的卡点，
-                      <span className="font-medium">建议不予秒批，转为人工受理</span>。
-                      可向群众说明原因并出具补正告知单，待材料补充后再次申请。
-                    </p>
-                  </div>
-                </div>
-              </div>
             </div>
           )}
         </div>
 
         {/* 补正建议 */}
-        {runSecondsApproval && (criticalCount > 0 || warningCount > 0) && (
+        {runSecondsApproval && (suggestionType === 'correction' || suggestionType === 'manual') && (
           <div className="bg-white rounded-xl border border-slate-200 shadow-sm flex-1 overflow-hidden">
             <div className="p-4 border-b border-slate-100 bg-slate-50">
-              <h3 className="font-medium text-slate-800 flex items-center space-x-2">
-                <FileText className="w-4 h-4 text-blue-500" />
-                <span>补正建议（补正而非退件</span>
-              </h3>
+              <div className="flex items-center justify-between">
+                <h3 className="font-medium text-slate-800 flex items-center space-x-2">
+                  <FileText className="w-4 h-4 text-blue-500" />
+                  <span>补正建议（补正而非退件）</span>
+                </h3>
+                <span className="text-xs text-slate-500">
+                  共 {blockingPoints.filter((bp) => bp.level !== 'info').length} 项待补正
+                </span>
+              </div>
             </div>
             <div className="p-4">
-              <div className="space-y-3">
-                {mockBlockingPoints
+              <div className="space-y-3 max-h-48 overflow-y-auto">
+                {blockingPoints
                   .filter((bp) => bp.level !== 'info')
                   .map((bp, index) => (
                     <div
                       key={bp.id}
-                      className="p-4 border border-slate-200 rounded-xl hover:border-blue-300 transition-colors cursor-pointer group"
+                      className="p-4 border border-slate-200 rounded-xl hover:border-blue-300 transition-colors"
                     >
                       <div className="flex items-center justify-between">
                         <div className="flex items-center space-x-3">
@@ -242,15 +340,60 @@ function SmartSuggestions({ currentService }: Props) {
                             <div className="text-sm text-slate-500">{bp.solution}</div>
                           </div>
                         </div>
-                        <ArrowRight className="w-4 h-4 text-slate-400 group-hover:text-blue-500 transition-colors" />
+                        <ArrowRight className="w-4 h-4 text-slate-400" />
                       </div>
                     </div>
                   ))}
               </div>
 
-              <button className="w-full mt-4 py-3 bg-gradient-to-r from-blue-500 to-blue-600 text-white rounded-xl font-medium hover:shadow-lg hover:shadow-blue-500/30 transition-all flex items-center justify-center space-x-2">
+              <button
+                onClick={handleGenerateCorrectionNotice}
+                className="w-full mt-4 py-3 bg-gradient-to-r from-blue-500 to-blue-600 text-white rounded-xl font-medium hover:shadow-lg hover:shadow-blue-500/30 transition-all flex items-center justify-center space-x-2"
+              >
                 <FileText className="w-5 h-5" />
-                <span>生成一次性补正告知单</span>
+                <span>一键生成补正告知单</span>
+              </button>
+            </div>
+          </div>
+        )}
+
+        {/* 秒批通过时的操作 */}
+        {runSecondsApproval && suggestionType === 'seconds' && (
+          <div className="bg-white rounded-xl border border-slate-200 shadow-sm p-5">
+            <div className="text-center">
+              <CheckCircle2 className="w-16 h-16 mx-auto mb-4 text-green-500" />
+              <h3 className="text-lg font-semibold text-slate-800 mb-2">恭喜！秒批通过</h3>
+              <p className="text-slate-600 mb-4">所有核验点均已通过，可直接办理</p>
+              <div className="grid grid-cols-2 gap-3">
+                <button
+                  onClick={goToReceipt}
+                  className="py-3 bg-gradient-to-r from-green-500 to-emerald-500 text-white rounded-xl font-medium hover:shadow-lg hover:shadow-green-500/30 transition-all flex items-center justify-center space-x-2"
+                >
+                  <ClipboardList className="w-4 h-4" />
+                  <span>生成受理回执</span>
+                </button>
+                <button className="py-3 bg-slate-100 text-slate-700 rounded-xl font-medium hover:bg-slate-200 transition-colors flex items-center justify-center space-x-2">
+                  <FileText className="w-4 h-4" />
+                  <span>查看详情</span>
+                </button>
+              </div>
+            </div>
+          </div>
+        )}
+
+        {/* 不予受理时的操作 */}
+        {runSecondsApproval && suggestionType === 'reject' && (
+          <div className="bg-white rounded-xl border border-slate-200 shadow-sm p-5">
+            <div className="text-center">
+              <XCircle className="w-16 h-16 mx-auto mb-4 text-red-500" />
+              <h3 className="text-lg font-semibold text-slate-800 mb-2">不符合受理条件</h3>
+              <p className="text-slate-600 mb-4">存在无法通过补正解决的问题，建议不予受理</p>
+              <button
+                onClick={goToReceipt}
+                className="w-full py-3 bg-gradient-to-r from-red-500 to-red-600 text-white rounded-xl font-medium hover:shadow-lg hover:shadow-red-500/30 transition-all flex items-center justify-center space-x-2"
+              >
+                <FileText className="w-5 h-5" />
+                <span>生成不予受理通知书</span>
               </button>
             </div>
           </div>
@@ -275,9 +418,7 @@ function SmartSuggestions({ currentService }: Props) {
                   className="border border-slate-200 rounded-xl overflow-hidden"
                 >
                   <button
-                    onClick={() =>
-                      setExpandedScenario(isExpanded ? null : scenario.id)
-                    }
+                    onClick={() => setExpandedScenario(isExpanded ? null : scenario.id)}
                     className="w-full p-4 flex items-center justify-between bg-white hover:bg-slate-50 transition-colors"
                   >
                     <div className="flex items-center space-x-3">
@@ -319,15 +460,39 @@ function SmartSuggestions({ currentService }: Props) {
           </div>
         </div>
 
+        {/* 核验点说明 */}
+        {rule && (
+          <div className="mt-4 bg-white rounded-xl border border-slate-200 shadow-sm p-4">
+            <h3 className="font-medium text-slate-800 mb-3 flex items-center space-x-2">
+              <Info className="w-4 h-4 text-blue-500" />
+              <span>核验点说明</span>
+            </h3>
+            <div className="space-y-2 max-h-40 overflow-y-auto">
+              {rule.checkPoints.map((cp) => (
+                <div key={cp.id} className="flex items-start space-x-2 text-sm">
+                  <div className="w-1.5 h-1.5 rounded-full bg-blue-500 mt-2 flex-shrink-0" />
+                  <div>
+                    <span className="font-medium text-slate-700">{cp.field}：</span>
+                    <span className="text-slate-500">{cp.description}</span>
+                  </div>
+                </div>
+              ))}
+            </div>
+          </div>
+        )}
+
         {/* 快捷操作 */}
         <div className="mt-4 grid grid-cols-2 gap-3">
           <button className="py-3 bg-slate-100 text-slate-700 rounded-xl font-medium hover:bg-slate-200 transition-colors flex items-center justify-center space-x-2">
             <FileText className="w-4 h-4" />
             <span>查看办事指南</span>
           </button>
-          <button className="py-3 bg-gradient-to-r from-purple-500 to-purple-600 text-white rounded-xl font-medium hover:shadow-lg hover:shadow-purple-500/30 transition-all flex items-center justify-center space-x-2">
+          <button
+            onClick={goToReceipt}
+            className="py-3 bg-gradient-to-r from-purple-500 to-purple-600 text-white rounded-xl font-medium hover:shadow-lg hover:shadow-purple-500/30 transition-all flex items-center justify-center space-x-2"
+          >
             <ThumbsUp className="w-4 h-4" />
-            <span>确认受理</span>
+            <span>去生成回执</span>
           </button>
         </div>
       </div>

@@ -15,8 +15,7 @@ import MaterialVerification from './pages/MaterialVerification'
 import SmartSuggestions from './pages/SmartSuggestions'
 import ExceptionHandling from './pages/ExceptionHandling'
 import ResultReceipt from './pages/ResultReceipt'
-import { mockApplicant } from './data/mockData'
-import type { ServiceItem } from './types'
+import { useAppContext } from './context/AppContext'
 
 const tabs = [
   { id: 'acceptance', name: '受理台', icon: ClipboardList, color: 'from-blue-500 to-blue-600' },
@@ -27,22 +26,21 @@ const tabs = [
 ]
 
 function App() {
-  const [activeTab, setActiveTab] = useState('acceptance')
-  const [currentService, setCurrentService] = useState<ServiceItem | null>(null)
   const [showNotices, setShowNotices] = useState(false)
+  const { currentService, activeTab, setActiveTab } = useAppContext()
 
   const renderContent = () => {
     switch (activeTab) {
       case 'acceptance':
-        return <AcceptanceDesk currentService={currentService} onServiceSelect={setCurrentService} />
+        return <AcceptanceDesk />
       case 'verification':
-        return <MaterialVerification currentService={currentService} />
+        return <MaterialVerification />
       case 'suggestions':
-        return <SmartSuggestions currentService={currentService} />
+        return <SmartSuggestions />
       case 'exception':
         return <ExceptionHandling />
       case 'receipt':
-        return <ResultReceipt currentService={currentService} applicant={mockApplicant} />
+        return <ResultReceipt />
       default:
         return null
     }

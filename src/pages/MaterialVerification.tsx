@@ -1,4 +1,4 @@
-import { useState } from 'react'
+import { useState, useEffect } from 'react'
 import {
   FileCheck,
   FileX,
@@ -12,11 +12,8 @@ import {
   RefreshCw,
   ScanLine,
 } from 'lucide-react'
-import type { ServiceItem, MaterialItem } from '../types'
-
-interface Props {
-  currentService: ServiceItem | null
-}
+import type { MaterialItem } from '../types'
+import { useAppContext } from '../context/AppContext'
 
 type MaterialStatus = 'pending' | 'shared' | 'submitted' | 'waived' | 'missing'
 
@@ -25,13 +22,23 @@ interface MaterialWithStatus extends MaterialItem {
   sharedTime?: string
 }
 
-function MaterialVerification({ currentService }: Props) {
-  const [materials, setMaterials] = useState<MaterialWithStatus[]>(
-    currentService?.requiredMaterials.map((m) => ({
-      ...m,
-      status: m.isShared ? 'pending' : 'pending',
-    })) || []
-  )
+function MaterialVerification() {
+  const { currentService } = useAppContext()
+  const [materials, setMaterials] = useState<MaterialWithStatus[]>([])
+
+  // 当切换事项时，自动重置材料清单
+  useEffect(() => {
+    if (currentService) {
+      setMaterials(
+        currentService.requiredMaterials.map((m) => ({
+          ...m,
+          status: 'pending',
+        }))
+      )
+    } else {
+      setMaterials([])
+    }
+  }, [currentService])
 
   const fetchSharedMaterial = (id: string) => {
     setMaterials((prev) =>

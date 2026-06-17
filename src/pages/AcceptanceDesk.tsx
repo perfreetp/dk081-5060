@@ -12,34 +12,30 @@ import {
   MapPin,
   CreditCard,
 } from 'lucide-react'
-import { mockServices, mockApplicant, serviceCategories } from '../data/mockData'
-import type { ServiceItem, Applicant } from '../types'
+import { mockServices, serviceCategories } from '../data/mockData'
+import { useAppContext } from '../context/AppContext'
 
-interface Props {
-  currentService: ServiceItem | null
-  onServiceSelect: (service: ServiceItem) => void
-}
-
-function AcceptanceDesk({ currentService, onServiceSelect }: Props) {
+function AcceptanceDesk() {
   const [searchQuery, setSearchQuery] = useState('')
   const [selectedCategory, setSelectedCategory] = useState('全部')
-  const [services, setServices] = useState(mockServices)
-  const [applicant, setApplicant] = useState<Applicant | null>(mockApplicant)
+  const { currentService, setCurrentService, applicant, isFavorite, toggleFavorite } = useAppContext()
 
-  const filteredServices = services.filter((s) => {
+  const filteredServices = mockServices.filter((s) => {
     const matchSearch = s.name.includes(searchQuery) || s.category.includes(searchQuery)
     const matchCategory = selectedCategory === '全部' || s.category === selectedCategory
     return matchSearch && matchCategory
   })
 
-  const toggleFavorite = (id: string, e: React.MouseEvent) => {
+  const handleToggleFavorite = (id: string, e: React.MouseEvent) => {
     e.stopPropagation()
-    setServices((prev) =>
-      prev.map((s) => (s.id === id ? { ...s, isFavorite: !s.isFavorite } : s))
-    )
+    toggleFavorite(id)
   }
 
-  const favoriteServices = services.filter((s) => s.isFavorite)
+  const handleServiceSelect = (service: typeof mockServices[0]) => {
+    setCurrentService(service)
+  }
+
+  const favoriteServices = mockServices.filter((s) => isFavorite(s.id))
 
   return (
     <div className="grid grid-cols-12 gap-6 h-full">
@@ -87,7 +83,7 @@ function AcceptanceDesk({ currentService, onServiceSelect }: Props) {
               {favoriteServices.map((s) => (
                 <button
                   key={s.id}
-                  onClick={() => onServiceSelect(s)}
+                  onClick={() => handleServiceSelect(s)}
                   className="px-3 py-2 text-sm bg-gradient-to-r from-amber-50 to-orange-50 border border-amber-200 text-amber-700 rounded-lg hover:shadow-md transition-all flex items-center space-x-2"
                 >
                   <Zap className="w-3.5 h-3.5" />
@@ -109,7 +105,7 @@ function AcceptanceDesk({ currentService, onServiceSelect }: Props) {
             {filteredServices.map((service) => (
               <div
                 key={service.id}
-                onClick={() => onServiceSelect(service)}
+                onClick={() => handleServiceSelect(service)}
                 className={`p-4 border-b border-slate-100 cursor-pointer transition-all hover:bg-blue-50/50 ${
                   currentService?.id === service.id ? 'bg-blue-50 border-l-4 border-l-blue-500' : ''
                 }`}
@@ -134,10 +130,11 @@ function AcceptanceDesk({ currentService, onServiceSelect }: Props) {
                   </div>
                   <div className="flex items-center space-x-2">
                     <button
-                      onClick={(e) => toggleFavorite(service.id, e)}
+                      onClick={(e) => handleToggleFavorite(service.id, e)}
                       className="p-1.5 rounded-lg hover:bg-slate-100 transition-colors"
+                      title={isFavorite(service.id) ? '取消收藏' : '添加收藏'}
                     >
-                      {service.isFavorite ? (
+                      {isFavorite(service.id) ? (
                         <Star className="w-4 h-4 text-amber-500 fill-amber-500" />
                       ) : (
                         <StarOff className="w-4 h-4 text-slate-300" />
