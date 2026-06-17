@@ -20,9 +20,13 @@ import {
   Edit3,
   ArrowLeft,
   ClipboardList,
+  Plus,
+  X,
+  Trash2,
+  AlertCircle,
 } from 'lucide-react'
 import { useAppContext } from '../context/AppContext'
-import type { ReceiptInfo } from '../types'
+import type { ReceiptInfo, CorrectionItem, RejectReasonItem } from '../types'
 
 type ReceiptType = 'accept' | 'correction' | 'reject'
 
@@ -117,13 +121,48 @@ function ResultReceipt() {
     approvalResult,
     blockingPoints,
     setActiveTab,
+    receiptDraft,
+    setReceiptType,
+    setReceiptGenerated,
+    updateCorrectionItems,
+    updateRejectReasons,
+    setCustomRejectReason,
+    addCustomCorrection,
+    removeCustomCorrection,
   } = useAppContext()
 
-  const [receiptType, setReceiptType] = useState<ReceiptType>('accept')
-  const [generated, setGenerated] = useState(false)
+  const [newCorrectionText, setNewCorrectionText] = useState('')
+
+  // 初始化补正项列表（从全局 correctionSuggestions 同步到草稿）
+  useEffect(() => {
+    if (!receiptDraft) return
+    if (correctionSuggestions.length > 0 && receiptDraft.correctionItems.length === 0) {
+      const items: CorrectionItem[] = correctionSuggestions.map((c, i) => ({
+        id: `corr-${Date.now()}-${i}`,
+        content: c,
+        selected: true,
+      }))
+      updateCorrectionItems(items)
+    }
+  }, [correctionSuggestions, receiptDraft, updateCorrectionItems])
+
+  // 初始化不予受理原因列表
+  useEffect(() => {
+    if (!receiptDraft) return
+    const criticalPoints = blockingPoints.filter((bp) => bp.level === 'critical')
+    if (criticalPoints.length > 0 && receiptDraft.rejectReasons.length === 0) {
+      const items: RejectReasonItem[] = criticalPoints.map((bp, i) => ({
+        id: `reject-${Date.now()}-${i}`,
+        content: `${bp.field}：${bp.reason}`,
+        selected: true,
+      }))
+      updateRejectReasons(items)
+    }
+  }, [blockingPoints, receiptDraft, updateRejectReasons])
 
   // 根据 approvalResult 自动选择回执类型
   useEffect(() => {
+    if (!receiptDraft) return
     if (approvalResult === 'correction') {
       setReceiptType('correction')
     } else if (approvalResult === 'reject') {
@@ -131,12 +170,10 @@ function ResultReceipt() {
     } else if (approvalResult === 'seconds' || approvalResult === 'manual') {
       setReceiptType('accept')
     }
-  }, [approvalResult])
+  }, [approvalResult, receiptDraft, setReceiptType])
 
-  // 切换事项时重置生成状态
-  useEffect(() => {
-    setGenerated(false)
-  }, [currentService])
+  const receiptType: ReceiptType = receiptDraft?.receiptType || 'accept'
+  const generated = receiptDraft?.generated || false
 
   const receiptTypes = [
     { id: 'accept' as ReceiptType, name: '受理回执', icon: CheckCircle2, color: 'green' },
@@ -181,31 +218,36 @@ function ResultReceipt() {
     applicant: applicant?.name || '',
     acceptTime: getCurrentTime(),
     promiseTime: getPromiseTime(),
-    materials:
-      receiptType === 'correction'
-        ? correctionSuggestions.length > 0
-          ? correctionSuggestions
-          : currentService?.requiredMaterials.filter((m) => m.isRequired).map((m) => m.name) || []
-        : currentService?.requiredMaterials.map((m) => m.name) || [],
+    materials: currentService?.requiredMaterials.map((m) => m.name) || [],
     resultType: receiptType,
   }
 
   const template = receiptTemplates[receiptType]
 
-  const getDisplayMaterials = () => {
-    if (receiptType === 'correction' && correctionSuggestions.length > 0) {
-      return correctionSuggestions
+  // 获取实际用于显示的材料/原因列表
+  const getDisplayMaterials = (): string[] => {
+    if (receiptType === 'correction') {
+      const selected = receiptDraft?.correctionItems.filter((c) => c.selected).map((c) => c.content) || []
+      const customs = receiptDraft?.customCorrections || []
+      return [...selected, ...customs]
     }
-    if (receiptType === 'reject' && blockingPoints.length > 0) {
-      return blockingPoints
-        .filter((bp) => bp.level === 'critical')
-        .map((bp) => `${bp.field}：${bp.reason}`)
+    if (receiptType === 'reject') {
+      const selected = receiptDraft?.rejectReasons.filter((r) => r.selected).map((r) => r.content) || []
+      const custom = receiptDraft?.customRejectReason?.trim()
+      return custom ? [...selected, custom] : selected
     }
     return currentService?.requiredMaterials.map((m) => m.name) || []
   }
 
   const handleGenerate = () => {
-    setGenerated(true)
+    // 不予受理必须至少有一个原因
+    if (receiptType === 'reject') {
+      const reasons = getDisplayMaterials()
+      if (reasons.length === 0) {
+        return
+      }
+    }
+    setReceiptGenerated(true)
   }
 
   const goToAcceptance = () => {
@@ -225,6 +267,40 @@ function ResultReceipt() {
     }
   }
 
+  const toggleCorrectionItem = (id: string) => {
+    const items = receiptDraft?.correctionItems.map((c) =>
+      c.id === id ? { ...c, selected: !c.selected } : c
+    ) || []
+    updateCorrectionItems(items)
+  }
+
+  const removeCorrectionItem = (id: string) => {
+    const items = receiptDraft?.correctionItems.filter((c) => c.id !== id) || []
+    updateCorrectionItems(items)
+  }
+
+  const toggleRejectReason = (id: string) => {
+    const items = receiptDraft?.rejectReasons.map((r) =>
+      r.id === id ? { ...r, selected: !r.selected } : r
+    ) || []
+    updateRejectReasons(items)
+  }
+
+  const removeRejectReason = (id: string) => {
+    const items = receiptDraft?.rejectReasons.filter((r) => r.id !== id) || []
+    updateRejectReasons(items)
+  }
+
+  const handleAddCustomCorrection = () => {
+    if (!newCorrectionText.trim()) return
+    addCustomCorrection(newCorrectionText.trim())
+    setNewCorrectionText('')
+  }
+
+  const displayMaterials = generated ? getDisplayMaterials() : []
+  const canGenerateReject =
+    receiptType !== 'reject' || getDisplayMaterials().length > 0
+
   // 未选择事项时的提示
   if (!currentService) {
     return (
@@ -234,9 +310,7 @@ function ResultReceipt() {
             <AlertTriangle className="w-12 h-12 text-amber-500" />
           </div>
           <h3 className="text-xl font-semibold text-slate-800 mb-2">请先选择办理事项</h3>
-          <p className="text-slate-500 mb-6">
-            您还未在受理台选择办理事项，无法生成回执
-          </p>
+          <p className="text-slate-500 mb-6">您还未在受理台选择办理事项，无法生成回执</p>
           <button
             onClick={goToAcceptance}
             className="inline-flex items-center space-x-2 px-6 py-3 bg-gradient-to-r from-blue-500 to-blue-600 text-white rounded-xl font-medium hover:shadow-lg hover:shadow-blue-500/30 transition-all"
@@ -249,12 +323,10 @@ function ResultReceipt() {
     )
   }
 
-  const displayMaterials = getDisplayMaterials()
-
   return (
     <div className="grid grid-cols-12 gap-6 h-full">
-      {/* 左侧：回执类型选择和操作 */}
-      <div className="col-span-4 flex flex-col space-y-4">
+      {/* 左侧：回执类型选择、编辑、操作 */}
+      <div className="col-span-4 flex flex-col space-y-4 overflow-y-auto">
         {/* 回执类型选择 */}
         <div className="bg-white rounded-xl border border-slate-200 shadow-sm p-5">
           <h3 className="font-medium text-slate-800 mb-4">选择回执类型</h3>
@@ -277,7 +349,9 @@ function ResultReceipt() {
               return (
                 <button
                   key={type.id}
-                  onClick={() => setReceiptType(type.id)}
+                  onClick={() => {
+                    setReceiptType(type.id)
+                  }}
                   className={`w-full flex items-center space-x-3 p-3 rounded-xl border-2 transition-all ${
                     isActive
                       ? `border-${type.color}-500 bg-${type.color}-50`
@@ -293,14 +367,156 @@ function ResultReceipt() {
                     <div className="font-medium text-slate-800">{type.name}</div>
                     <div className="text-xs text-slate-500">一键生成标准文书</div>
                   </div>
-                  {isActive && (
-                    <CheckCircle2 className={`w-5 h-5 text-${type.color}-500`} />
-                  )}
+                  {isActive && <CheckCircle2 className={`w-5 h-5 text-${type.color}-500`} />}
                 </button>
               )
             })}
           </div>
         </div>
+
+        {/* 补正告知单 - 补正项编辑 */}
+        {receiptType === 'correction' && (
+          <div className="bg-white rounded-xl border border-slate-200 shadow-sm p-5">
+            <h3 className="font-medium text-slate-800 mb-3 flex items-center justify-between">
+              <span className="flex items-center space-x-2">
+                <Edit3 className="w-4 h-4 text-amber-500" />
+                <span>补正项编辑</span>
+              </span>
+              <span className="text-xs text-slate-500">
+                已选 {(receiptDraft?.correctionItems.filter((c) => c.selected).length || 0) +
+                  (receiptDraft?.customCorrections.length || 0)} 项
+              </span>
+            </h3>
+
+            {/* 系统检测出的补正项 */}
+            {(receiptDraft?.correctionItems.length || 0) > 0 && (
+              <div className="space-y-2 mb-4">
+                <div className="text-xs text-slate-500 mb-1">系统检测补正建议</div>
+                {receiptDraft?.correctionItems.map((item) => (
+                  <div
+                    key={item.id}
+                    className="flex items-center space-x-2 p-2 rounded-lg bg-amber-50 border border-amber-100"
+                  >
+                    <input
+                      type="checkbox"
+                      checked={item.selected}
+                      onChange={() => toggleCorrectionItem(item.id)}
+                      className="text-amber-500 rounded"
+                    />
+                    <span className="flex-1 text-sm text-slate-700">{item.content}</span>
+                    <button
+                      onClick={() => removeCorrectionItem(item.id)}
+                      className="p-1 text-slate-400 hover:text-red-500"
+                    >
+                      <Trash2 className="w-3.5 h-3.5" />
+                    </button>
+                  </div>
+                ))}
+              </div>
+            )}
+
+            {/* 手动添加补正项 */}
+            {(receiptDraft?.customCorrections.length || 0) > 0 && (
+              <div className="space-y-2 mb-4">
+                <div className="text-xs text-slate-500 mb-1">手动添加的补正项</div>
+                {receiptDraft?.customCorrections.map((item, idx) => (
+                  <div
+                    key={idx}
+                    className="flex items-center space-x-2 p-2 rounded-lg bg-blue-50 border border-blue-100"
+                  >
+                    <CheckCircle2 className="w-4 h-4 text-blue-500" />
+                    <span className="flex-1 text-sm text-slate-700">{item}</span>
+                    <button
+                      onClick={() => removeCustomCorrection(idx)}
+                      className="p-1 text-slate-400 hover:text-red-500"
+                    >
+                      <Trash2 className="w-3.5 h-3.5" />
+                    </button>
+                  </div>
+                ))}
+              </div>
+            )}
+
+            {/* 添加新补正项 */}
+            <div className="flex items-center space-x-2">
+              <input
+                type="text"
+                value={newCorrectionText}
+                onChange={(e) => setNewCorrectionText(e.target.value)}
+                placeholder="输入需要补充的内容..."
+                className="flex-1 px-3 py-2 text-sm border border-slate-300 rounded-lg focus:ring-2 focus:ring-amber-500 focus:border-amber-500"
+                onKeyDown={(e) => {
+                  if (e.key === 'Enter') handleAddCustomCorrection()
+                }}
+              />
+              <button
+                onClick={handleAddCustomCorrection}
+                disabled={!newCorrectionText.trim()}
+                className="p-2 bg-amber-500 text-white rounded-lg hover:bg-amber-600 disabled:opacity-50"
+              >
+                <Plus className="w-4 h-4" />
+              </button>
+            </div>
+          </div>
+        )}
+
+        {/* 不予受理 - 原因编辑 */}
+        {receiptType === 'reject' && (
+          <div className="bg-white rounded-xl border border-slate-200 shadow-sm p-5">
+            <h3 className="font-medium text-slate-800 mb-3 flex items-center space-x-2">
+              <AlertCircle className="w-4 h-4 text-red-500" />
+              <span>不予受理原因编辑</span>
+            </h3>
+
+            {/* 系统检测出的原因 */}
+            {(receiptDraft?.rejectReasons.length || 0) > 0 && (
+              <div className="space-y-2 mb-4">
+                <div className="text-xs text-slate-500 mb-1">系统检测到的不予受理原因</div>
+                {receiptDraft?.rejectReasons.map((item) => (
+                  <div
+                    key={item.id}
+                    className="flex items-center space-x-2 p-2 rounded-lg bg-red-50 border border-red-100"
+                  >
+                    <input
+                      type="checkbox"
+                      checked={item.selected}
+                      onChange={() => toggleRejectReason(item.id)}
+                      className="text-red-500 rounded"
+                    />
+                    <span className="flex-1 text-sm text-slate-700">{item.content}</span>
+                    <button
+                      onClick={() => removeRejectReason(item.id)}
+                      className="p-1 text-slate-400 hover:text-red-500"
+                    >
+                      <Trash2 className="w-3.5 h-3.5" />
+                    </button>
+                  </div>
+                ))}
+              </div>
+            )}
+
+            {/* 手动补录原因 */}
+            <div>
+              <div className="text-xs text-slate-500 mb-1">
+                手动补录原因（未检测到原因时必填）
+              </div>
+              <textarea
+                value={receiptDraft?.customRejectReason || ''}
+                onChange={(e) => setCustomRejectReason(e.target.value)}
+                placeholder="请输入不予受理的具体原因..."
+                rows={3}
+                className="w-full px-3 py-2 text-sm border border-slate-300 rounded-lg focus:ring-2 focus:ring-red-500 focus:border-red-500 resize-none"
+              />
+            </div>
+
+            {!canGenerateReject && (
+              <div className="mt-3 p-2 rounded-lg bg-amber-50 border border-amber-200 flex items-start space-x-2">
+                <AlertTriangle className="w-4 h-4 text-amber-500 mt-0.5 flex-shrink-0" />
+                <span className="text-xs text-amber-700">请至少选择或录入一项不予受理原因</span>
+              </div>
+            )}
+          </div>
+        )}
 
         {/* 当前事项信息 */}
         <div className="bg-white rounded-xl border border-slate-200 shadow-sm p-5">
@@ -323,14 +539,19 @@ function ResultReceipt() {
         {/* 生成按钮 */}
         <button
           onClick={handleGenerate}
-          className="w-full py-4 bg-gradient-to-r from-blue-500 to-blue-600 text-white rounded-xl font-medium hover:shadow-lg hover:shadow-blue-500/30 transition-all flex items-center justify-center space-x-2"
+          disabled={!canGenerateReject}
+          className={`w-full py-4 rounded-xl font-medium transition-all flex items-center justify-center space-x-2 ${
+            canGenerateReject
+              ? 'bg-gradient-to-r from-blue-500 to-blue-600 text-white hover:shadow-lg hover:shadow-blue-500/30'
+              : 'bg-slate-200 text-slate-400 cursor-not-allowed'
+          }`}
         >
           <Receipt className="w-5 h-5" />
           <span>生成{receiptTypes.find((t) => t.id === receiptType)?.name}</span>
         </button>
 
         {/* 快捷操作 */}
-        <div className="bg-white rounded-xl border border-slate-200 shadow-sm p-5 flex-1">
+        <div className="bg-white rounded-xl border border-slate-200 shadow-sm p-5">
           <h3 className="font-medium text-slate-800 mb-4">快捷操作</h3>
           <div className="space-y-2">
             {[
@@ -377,33 +598,6 @@ function ResultReceipt() {
             })}
           </div>
         </div>
-
-        {/* 帮办代办快捷入口 */}
-        <div className="bg-gradient-to-br from-purple-500 to-indigo-600 rounded-xl p-5 text-white">
-          <div className="flex items-center space-x-3 mb-3">
-            <div className="w-10 h-10 rounded-lg bg-white/10 flex items-center justify-center">
-              <Star className="w-5 h-5" />
-            </div>
-            <div>
-              <div className="font-medium">帮办代办模式</div>
-              <div className="text-xs text-purple-200">代办人员专用</div>
-            </div>
-          </div>
-          <p className="text-sm text-purple-200 mb-3">
-            一键生成告知单，自动填充申请人信息
-          </p>
-          <button
-            disabled={!generated}
-            className={`w-full py-2 rounded-lg text-sm font-medium transition-colors flex items-center justify-center space-x-2 ${
-              generated
-                ? 'bg-white/10 hover:bg-white/20 cursor-pointer'
-                : 'bg-white/5 opacity-50 cursor-not-allowed'
-            }`}
-          >
-            <FileCheck className="w-4 h-4" />
-            <span>进入代办模式</span>
-          </button>
-        </div>
       </div>
 
       {/* 右侧：回执预览 */}
@@ -412,7 +606,11 @@ function ResultReceipt() {
           <div className="p-4 border-b border-slate-100 bg-slate-50 flex items-center justify-between">
             <h3 className="font-medium text-slate-800">回执预览</h3>
             {generated && (
-              <span className={`px-2 py-0.5 text-xs rounded font-medium ${getReceiptTypeStyle(receiptType)}`}>
+              <span
+                className={`px-2 py-0.5 text-xs rounded font-medium ${getReceiptTypeStyle(
+                  receiptType
+                )}`}
+              >
                 {template.badgeLabel}
               </span>
             )}
@@ -423,7 +621,9 @@ function ResultReceipt() {
               {/* 回执卡片 */}
               <div className="max-w-lg mx-auto bg-white rounded-2xl shadow-lg overflow-hidden border border-slate-200">
                 {/* 页眉 - 根据类型变化 */}
-                <div className={`bg-gradient-to-r ${template.headerColor} p-6 text-white text-center`}>
+                <div
+                  className={`bg-gradient-to-r ${template.headerColor} p-6 text-white text-center`}
+                >
                   <div className="flex items-center justify-center space-x-2 mb-2">
                     <div className="w-8 h-8 rounded-full bg-white/20 flex items-center justify-center">
                       <Star className="w-4 h-4 text-yellow-300" />
@@ -436,7 +636,11 @@ function ResultReceipt() {
                 {/* 回执号 */}
                 <div className="p-4 border-b border-slate-100 text-center">
                   <div className="text-xs text-slate-500 mb-1">
-                    {receiptType === 'accept' ? '受理编号' : receiptType === 'correction' ? '补正编号' : '通知编号'}
+                    {receiptType === 'accept'
+                      ? '受理编号'
+                      : receiptType === 'correction'
+                      ? '补正编号'
+                      : '通知编号'}
                   </div>
                   <div className="font-mono text-xl font-bold text-blue-600">
                     {receiptData.receiptNo}
@@ -496,12 +700,12 @@ function ResultReceipt() {
                     )}
                   </div>
 
-                  {/* 导语 - 根据类型变化 */}
+                  {/* 导语 */}
                   <div className="p-3 bg-slate-50 rounded-lg">
                     <p className="text-sm text-slate-700">{template.introText}</p>
                   </div>
 
-                  {/* 材料/原因清单 - 根据类型变化 */}
+                  {/* 材料/原因清单 */}
                   <div>
                     <div className="text-xs text-slate-500 mb-2">{template.materialsTitle}</div>
                     <div className="space-y-1.5">
@@ -522,11 +726,14 @@ function ResultReceipt() {
                           <span>{material}</span>
                         </div>
                       ))}
+                      {displayMaterials.length === 0 && (
+                        <div className="text-sm text-slate-400 italic">暂无内容</div>
+                      )}
                     </div>
                   </div>
                 </div>
 
-                {/* 群众话术 - 橙色框，所有类型都有 */}
+                {/* 群众话术 */}
                 <div className="mx-5 mb-4 p-4 bg-orange-50 border border-orange-200 rounded-xl">
                   <div className="text-sm font-medium text-orange-800 mb-1 flex items-center space-x-2">
                     <FileText className="w-4 h-4" />
@@ -537,7 +744,7 @@ function ResultReceipt() {
                   </p>
                 </div>
 
-                {/* 温馨提示/补正说明/救济途径 - 根据类型变化 */}
+                {/* 温馨提示/补正说明/救济途径 */}
                 <div
                   className={`mx-5 mb-5 p-4 rounded-xl ${
                     receiptType === 'accept'
@@ -579,29 +786,15 @@ function ResultReceipt() {
                   <p className="mt-1">本文书与纸质原件具有同等效力</p>
                 </div>
               </div>
-
-              {/* 一次性告知提示 */}
-              {receiptType !== 'reject' && (
-                <div className="max-w-lg mx-auto mt-6 p-4 bg-green-50 border border-green-200 rounded-xl">
-                  <div className="flex items-start space-x-3">
-                    <FileCheck className="w-5 h-5 text-green-600 flex-shrink-0 mt-0.5" />
-                    <div>
-                      <div className="font-medium text-green-800">一次性告知完成</div>
-                      <p className="text-sm text-green-700 mt-1">
-                        所有申请材料、办理流程、注意事项已一次性告知申请人，
-                        确保群众"最多跑一次"。
-                      </p>
-                    </div>
-                  </div>
-                </div>
-              )}
             </div>
           ) : (
             <div className="h-full flex items-center justify-center">
               <div className="text-center text-slate-400">
                 <Receipt className="w-20 h-20 mx-auto mb-4 opacity-30" />
                 <p className="text-lg">选择回执类型并点击生成</p>
-                <p className="text-sm mt-2">系统将自动生成标准格式{receiptTypes.find((t) => t.id === receiptType)?.name}</p>
+                <p className="text-sm mt-2">
+                  系统将自动生成标准格式{receiptTypes.find((t) => t.id === receiptType)?.name}
+                </p>
               </div>
             </div>
           )}

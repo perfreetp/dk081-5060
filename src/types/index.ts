@@ -77,3 +77,30 @@ export interface ReceiptInfo {
   resultType: 'accept' | 'correction' | 'reject'
   remarks?: string
 }
+
+export interface MaterialWithStatus extends MaterialItem {
+  status: 'pending' | 'shared' | 'submitted' | 'waived' | 'missing'
+  sharedTime?: string
+  problem?: string
+}
+
+export interface CorrectionItem {
+  id: string
+  content: string
+  selected: boolean
+}
+
+export interface RejectReasonItem {
+  id: string
+  content: string
+  selected: boolean
+}
+
+export interface ReceiptDraft {
+  receiptType: 'accept' | 'correction' | 'reject'
+  generated: boolean
+  correctionItems: CorrectionItem[]
+  rejectReasons: RejectReasonItem[]
+  customRejectReason: string
+  customCorrections: string[]
+}

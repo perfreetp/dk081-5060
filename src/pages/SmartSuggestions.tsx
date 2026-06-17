@@ -15,6 +15,8 @@ import {
   Users,
   Edit3,
   ClipboardList,
+  AlertOctagon,
+  ArrowLeftRight,
 } from 'lucide-react'
 import { useAppContext } from '../context/AppContext'
 import {
@@ -73,9 +75,16 @@ function SmartSuggestions() {
   }
 
   const handleGenerateCorrectionNotice = () => {
-    // 保存状态并跳转到结果回执的补正告知单
     setApprovalResult('correction')
     goToReceipt()
+  }
+
+  const goToExceptionHandling = () => {
+    setActiveTab('exception')
+  }
+
+  const goToMaterialVerification = () => {
+    setActiveTab('material')
   }
 
   const getLevelStyle = (level: string) => {
@@ -307,40 +316,40 @@ function SmartSuggestions() {
           )}
         </div>
 
-        {/* 补正建议 */}
-        {runSecondsApproval && (suggestionType === 'correction' || suggestionType === 'manual') && (
+        {/* 补正建议（仅 correction 场景显示） */}
+        {runSecondsApproval && suggestionType === 'correction' && (
           <div className="bg-white rounded-xl border border-slate-200 shadow-sm flex-1 overflow-hidden">
-            <div className="p-4 border-b border-slate-100 bg-slate-50">
+            <div className="p-4 border-b border-slate-100 bg-amber-50">
               <div className="flex items-center justify-between">
                 <h3 className="font-medium text-slate-800 flex items-center space-x-2">
-                  <FileText className="w-4 h-4 text-blue-500" />
+                  <FileText className="w-4 h-4 text-amber-500" />
                   <span>补正建议（补正而非退件）</span>
                 </h3>
-                <span className="text-xs text-slate-500">
-                  共 {blockingPoints.filter((bp) => bp.level !== 'info').length} 项待补正
+                <span className="text-xs text-amber-600">
+                  共 {blockingPoints.filter((bp) => bp.level === 'warning').length} 项待补正
                 </span>
               </div>
             </div>
             <div className="p-4">
               <div className="space-y-3 max-h-48 overflow-y-auto">
                 {blockingPoints
-                  .filter((bp) => bp.level !== 'info')
+                  .filter((bp) => bp.level === 'warning' && bp.solution)
                   .map((bp, index) => (
                     <div
                       key={bp.id}
-                      className="p-4 border border-slate-200 rounded-xl hover:border-blue-300 transition-colors"
+                      className="p-4 border border-amber-200 rounded-xl bg-amber-50/30"
                     >
                       <div className="flex items-center justify-between">
                         <div className="flex items-center space-x-3">
-                          <div className="w-8 h-8 rounded-full bg-blue-100 flex items-center justify-center">
-                            <span className="text-sm font-medium text-blue-600">{index + 1}</span>
+                          <div className="w-8 h-8 rounded-full bg-amber-100 flex items-center justify-center">
+                            <span className="text-sm font-medium text-amber-600">{index + 1}</span>
                           </div>
                           <div>
                             <div className="font-medium text-slate-800">{bp.field}补正</div>
                             <div className="text-sm text-slate-500">{bp.solution}</div>
                           </div>
                         </div>
-                        <ArrowRight className="w-4 h-4 text-slate-400" />
+                        <ArrowRight className="w-4 h-4 text-amber-400" />
                       </div>
                     </div>
                   ))}
@@ -348,11 +357,63 @@ function SmartSuggestions() {
 
               <button
                 onClick={handleGenerateCorrectionNotice}
-                className="w-full mt-4 py-3 bg-gradient-to-r from-blue-500 to-blue-600 text-white rounded-xl font-medium hover:shadow-lg hover:shadow-blue-500/30 transition-all flex items-center justify-center space-x-2"
+                className="w-full mt-4 py-3 bg-gradient-to-r from-amber-500 to-orange-500 text-white rounded-xl font-medium hover:shadow-lg hover:shadow-amber-500/30 transition-all flex items-center justify-center space-x-2"
               >
                 <FileText className="w-5 h-5" />
                 <span>一键生成补正告知单</span>
               </button>
+            </div>
+          </div>
+        )}
+
+        {/* 转人工指引（仅 manual 场景显示） */}
+        {runSecondsApproval && suggestionType === 'manual' && (
+          <div className="bg-white rounded-xl border border-slate-200 shadow-sm flex-1 overflow-hidden">
+            <div className="p-4 border-b border-slate-100 bg-blue-50">
+              <h3 className="font-medium text-slate-800 flex items-center space-x-2">
+                <Users className="w-4 h-4 text-blue-500" />
+                <span>转人工受理指引</span>
+              </h3>
+            </div>
+            <div className="p-4 space-y-3">
+              <div className="p-4 border border-blue-200 rounded-xl bg-blue-50/50">
+                <div className="flex items-start space-x-3">
+                  <div className="w-8 h-8 rounded-full bg-blue-100 flex items-center justify-center flex-shrink-0">
+                    <AlertOctagon className="w-4 h-4 text-blue-600" />
+                  </div>
+                  <div>
+                    <div className="font-medium text-slate-800 mb-1">需人工核实的事项</div>
+                    <div className="text-sm text-slate-500 space-y-1">
+                      {blockingPoints
+                        .filter((bp) => bp.level === 'warning')
+                        .map((bp) => (
+                          <div key={bp.id}>• {bp.field}：{bp.reason}</div>
+                        ))}
+                    </div>
+                  </div>
+                </div>
+              </div>
+
+              <p className="text-sm text-slate-600">
+                该事项存在系统无法自动判定的情况，建议引导群众至人工窗口进行核验，或进行异常处置登记。
+              </p>
+
+              <div className="grid grid-cols-2 gap-3">
+                <button
+                  onClick={goToMaterialVerification}
+                  className="py-3 bg-gradient-to-r from-blue-500 to-blue-600 text-white rounded-xl font-medium hover:shadow-lg hover:shadow-blue-500/30 transition-all flex items-center justify-center space-x-2"
+                >
+                  <ArrowLeftRight className="w-4 h-4" />
+                  <span>去人工核验</span>
+                </button>
+                <button
+                  onClick={goToExceptionHandling}
+                  className="py-3 bg-slate-100 text-slate-700 rounded-xl font-medium hover:bg-slate-200 transition-colors flex items-center justify-center space-x-2"
+                >
+                  <AlertOctagon className="w-4 h-4" />
+                  <span>异常处置登记</span>
+                </button>
+              </div>
             </div>
           </div>
         )}

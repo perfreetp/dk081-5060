@@ -11,67 +11,117 @@ import {
   Download,
   RefreshCw,
   ScanLine,
+  Plus,
+  X,
+  AlertTriangle,
 } from 'lucide-react'
-import type { MaterialItem } from '../types'
 import { useAppContext } from '../context/AppContext'
-
-type MaterialStatus = 'pending' | 'shared' | 'submitted' | 'waived' | 'missing'
-
-interface MaterialWithStatus extends MaterialItem {
-  status: MaterialStatus
-  sharedTime?: string
-}
+import {
+  getVerificationPoints,
+  categoryConfig,
+} from '../data/verificationPoints'
+import type { BlockingPoint } from '../types'
 
 function MaterialVerification() {
-  const { currentService } = useAppContext()
-  const [materials, setMaterials] = useState<MaterialWithStatus[]>([])
+  const {
+    currentService,
+    materials,
+    setMaterials,
+    updateMaterialStatus,
+    blockingPoints,
+    addBlockingPoint,
+    removeBlockingPoint,
+  } = useAppContext()
 
-  // 当切换事项时，自动重置材料清单
+  const [showProblemInput, setShowProblemInput] = useState<string | null>(null)
+  const [problemText, setProblemText] = useState('')
+  const [problemLevel, setProblemLevel] = useState<'warning' | 'critical'>('warning')
+
+  // 当切换事项时，自动重置材料清单（只在材料为空时初始化，避免覆盖草稿）
   useEffect(() => {
-    if (currentService) {
+    if (currentService && materials.length === 0) {
       setMaterials(
         currentService.requiredMaterials.map((m) => ({
           ...m,
           status: 'pending',
         }))
       )
-    } else {
-      setMaterials([])
     }
-  }, [currentService])
+  }, [currentService, materials.length, setMaterials])
 
   const fetchSharedMaterial = (id: string) => {
-    setMaterials((prev) =>
-      prev.map((m) =>
-        m.id === id
-          ? { ...m, status: 'shared', sharedTime: new Date().toLocaleTimeString() }
-          : m
-      )
-    )
+    updateMaterialStatus(id, 'shared')
   }
 
   const fetchAllShared = () => {
-    setMaterials((prev) =>
-      prev.map((m) =>
-        m.isShared ? { ...m, status: 'shared', sharedTime: new Date().toLocaleTimeString() } : m
-      )
-    )
+    materials.forEach((m) => {
+      if (m.isShared && m.status === 'pending') {
+        updateMaterialStatus(m.id, 'shared')
+      }
+    })
   }
 
-  const getStatusInfo = (status: MaterialStatus) => {
-    const statusMap = {
+  const handleMarkMissing = (materialId: string, materialName: string) => {
+    updateMaterialStatus(materialId, 'missing')
+    // 自动同步到卡点列表（默认可补正级别）
+    const newPoint: BlockingPoint = {
+      id: `mat-${materialId}-${Date.now()}`,
+      field: materialName,
+      reason: '材料缺失，群众未提交该项材料',
+      solution: `请补充提交「${materialName}」`,
+      level: 'warning',
+    }
+    addBlockingPoint(newPoint)
+  }
+
+  const handleAddProblem = (materialId: string, materialName: string) => {
+    if (!problemText.trim()) return
+
+    const level = problemLevel
+    const newPoint: BlockingPoint = {
+      id: `mat-${materialId}-${Date.now()}`,
+      field: materialName,
+      reason: problemText,
+      solution:
+        level === 'warning'
+          ? `请针对「${materialName}」补正：${problemText}`
+          : `「${materialName}」存在问题：${problemText}，建议不予受理或转人工`,
+      level,
+    }
+    addBlockingPoint(newPoint)
+
+    if (level === 'critical') {
+      updateMaterialStatus(materialId, 'missing', problemText)
+    } else {
+      updateMaterialStatus(materialId, 'waived', problemText)
+    }
+
+    setShowProblemInput(null)
+    setProblemText('')
+  }
+
+  const getStatusInfo = (status: string) => {
+    const statusMap: Record<
+      string,
+      { label: string; icon: any; color: string; bg: string }
+    > = {
       pending: { label: '待调取', icon: Clock, color: 'text-slate-500', bg: 'bg-slate-100' },
       shared: { label: '已共享', icon: CheckCircle2, color: 'text-green-600', bg: 'bg-green-100' },
       submitted: { label: '已提交', icon: FileCheck, color: 'text-blue-600', bg: 'bg-blue-100' },
       waived: { label: '容缺', icon: FileQuestion, color: 'text-amber-600', bg: 'bg-amber-100' },
       missing: { label: '缺失', icon: FileX, color: 'text-red-600', bg: 'bg-red-100' },
     }
-    return statusMap[status]
+    return statusMap[status] || statusMap.pending
   }
 
   const sharedCount = materials.filter((m) => m.status === 'shared').length
   const sharedTotal = materials.filter((m) => m.isShared).length
-  const completionRate = materials.length > 0 ? Math.round((sharedCount / materials.length) * 100) : 0
+  const completionRate =
+    materials.length > 0 ? Math.round((sharedCount / materials.length) * 100) : 0
+
+  const verificationPoints = currentService
+    ? getVerificationPoints(currentService.id)
+    : []
 
   if (!currentService) {
     return (
@@ -125,6 +175,36 @@ function MaterialVerification() {
           </button>
         )}
 
+        {/* 已发现卡点提示 */}
+        {blockingPoints.length > 0 && (
+          <div className="mb-4 p-4 rounded-xl border border-amber-200 bg-amber-50">
+            <div className="flex items-center space-x-2 mb-2">
+              <AlertTriangle className="w-5 h-5 text-amber-600" />
+              <span className="font-medium text-amber-800">
+                已发现 {blockingPoints.length} 个问题，已同步至智能建议
+              </span>
+            </div>
+            <div className="space-y-1 max-h-24 overflow-y-auto">
+              {blockingPoints.slice(0, 3).map((bp) => (
+                <div key={bp.id} className="flex items-center justify-between text-sm">
+                  <span className="text-amber-700">
+                    {bp.level === 'critical' ? '❌' : '⚠️'} {bp.field}：{bp.reason}
+                  </span>
+                  <button
+                    onClick={() => removeBlockingPoint(bp.id)}
+                    className="p-0.5 text-amber-400 hover:text-amber-700"
+                  >
+                    <X className="w-3.5 h-3.5" />
+                  </button>
+                </div>
+              ))}
+              {blockingPoints.length > 3 && (
+                <div className="text-xs text-amber-500">另有 {blockingPoints.length - 3} 条问题...</div>
+              )}
+            </div>
+          </div>
+        )}
+
         {/* 材料列表 */}
         <div className="bg-white rounded-xl border border-slate-200 shadow-sm flex-1 overflow-hidden">
           <div className="p-4 border-b border-slate-100 bg-slate-50">
@@ -156,6 +236,8 @@ function MaterialVerification() {
                       ? 'border-green-200 bg-green-50/50'
                       : material.status === 'missing'
                       ? 'border-red-200 bg-red-50/50'
+                      : material.status === 'waived'
+                      ? 'border-amber-200 bg-amber-50/50'
                       : 'border-slate-200 bg-white hover:border-slate-300'
                   }`}
                 >
@@ -192,6 +274,63 @@ function MaterialVerification() {
                         {material.source && <span>数据来源：{material.source}</span>}
                         {material.sharedTime && <span>调取时间：{material.sharedTime}</span>}
                       </div>
+
+                      {material.problem && (
+                        <div className="mt-2 p-2 rounded-lg bg-red-50 border border-red-100">
+                          <div className="flex items-start space-x-1 text-xs text-red-600">
+                            <AlertTriangle className="w-3.5 h-3.5 flex-shrink-0 mt-0.5" />
+                            <span>问题：{material.problem}</span>
+                          </div>
+                        </div>
+                      )}
+
+                      {showProblemInput === material.id && (
+                        <div className="mt-3 space-y-2">
+                          <textarea
+                            value={problemText}
+                            onChange={(e) => setProblemText(e.target.value)}
+                            placeholder="请描述发现的问题..."
+                            className="w-full p-2 text-sm border border-slate-300 rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-blue-500 resize-none"
+                            rows={2}
+                          />
+                          <div className="flex items-center space-x-3">
+                            <div className="flex items-center space-x-2">
+                              <label className="flex items-center space-x-1 text-xs">
+                                <input
+                                  type="radio"
+                                  checked={problemLevel === 'warning'}
+                                  onChange={() => setProblemLevel('warning')}
+                                  className="text-amber-500"
+                                />
+                                <span className="text-amber-600">可补正</span>
+                              </label>
+                              <label className="flex items-center space-x-1 text-xs">
+                                <input
+                                  type="radio"
+                                  checked={problemLevel === 'critical'}
+                                  onChange={() => setProblemLevel('critical')}
+                                  className="text-red-500"
+                                />
+                                <span className="text-red-600">不予受理</span>
+                              </label>
+                            </div>
+                            <div className="flex-1" />
+                            <button
+                              onClick={() => setShowProblemInput(null)}
+                              className="px-3 py-1.5 text-xs text-slate-600 hover:bg-slate-100 rounded-lg"
+                            >
+                              取消
+                            </button>
+                            <button
+                              onClick={() => handleAddProblem(material.id, material.name)}
+                              disabled={!problemText.trim()}
+                              className="px-3 py-1.5 text-xs bg-blue-500 text-white rounded-lg hover:bg-blue-600 disabled:opacity-50"
+                            >
+                              添加问题
+                            </button>
+                          </div>
+                        </div>
+                      )}
                     </div>
 
                     <div className="flex items-center space-x-2">
@@ -220,6 +359,32 @@ function MaterialVerification() {
                           <RefreshCw className="w-4 h-4" />
                         </button>
                       )}
+
+                      {material.status === 'pending' && (
+                        <button
+                          onClick={() => handleMarkMissing(material.id, material.name)}
+                          className="p-2 bg-red-50 text-red-600 rounded-lg hover:bg-red-100 transition-colors"
+                          title="标记为缺失"
+                        >
+                          <FileX className="w-4 h-4" />
+                        </button>
+                      )}
+
+                      <button
+                        onClick={() => {
+                          setShowProblemInput(showProblemInput === material.id ? null : material.id)
+                          setProblemText('')
+                          setProblemLevel('warning')
+                        }}
+                        className={`p-2 rounded-lg transition-colors ${
+                          showProblemInput === material.id
+                            ? 'bg-amber-100 text-amber-600'
+                            : 'bg-slate-100 text-slate-600 hover:bg-amber-50 hover:text-amber-600'
+                        }`}
+                        title="登记问题"
+                      >
+                        <Plus className="w-4 h-4" />
+                      </button>
                     </div>
                   </div>
                 </div>
@@ -229,7 +394,7 @@ function MaterialVerification() {
         </div>
       </div>
 
-      {/* 右侧：核验提示 */}
+      {/* 右侧：核验要点 */}
       <div className="col-span-5 flex flex-col space-y-4">
         {/* 共享提示卡片 */}
         <div className="bg-gradient-to-br from-emerald-50 to-green-50 border border-emerald-200 rounded-xl p-5">
@@ -257,31 +422,34 @@ function MaterialVerification() {
           </div>
         </div>
 
-        {/* 核验要点 */}
+        {/* 核验要点 - 跟随事项变化 */}
         <div className="bg-white rounded-xl border border-slate-200 shadow-sm flex-1 overflow-hidden">
-          <div className="p-4 border-b border-slate-100 bg-slate-50">
+          <div className="p-4 border-b border-slate-100 bg-gradient-to-r from-blue-50 to-indigo-50">
             <h3 className="font-medium text-slate-800 flex items-center space-x-2">
-              <AlertCircle className="w-4 h-4 text-amber-500" />
-              <span>核验要点</span>
+              <AlertCircle className="w-4 h-4 text-blue-500" />
+              <span>{currentService.name} - 核验要点</span>
             </h3>
           </div>
-          <div className="p-4 space-y-3">
-            {[
-              { title: '身份一致性核验', desc: '确保申请人与证件持有人为同一人' },
-              { title: '证照有效期核验', desc: '检查共享获取的证照是否在有效期内' },
-              { title: '材料完整性核验', desc: '核对所有必填项是否齐全' },
-              { title: '逻辑一致性核验', desc: '验证各材料间信息是否一致' },
-            ].map((item, index) => (
-              <div key={index} className="flex items-start space-x-3 p-3 bg-slate-50 rounded-lg">
-                <div className="w-6 h-6 rounded-full bg-blue-100 flex items-center justify-center flex-shrink-0">
-                  <span className="text-xs font-medium text-blue-600">{index + 1}</span>
+          <div className="p-4 space-y-3 overflow-y-auto max-h-[calc(100vh-500px)]">
+            {verificationPoints.map((vp, index) => {
+              const cat = categoryConfig[vp.category]
+              return (
+                <div key={vp.id} className="flex items-start space-x-3 p-3 bg-slate-50 rounded-lg hover:bg-slate-100 transition-colors">
+                  <div className="w-7 h-7 rounded-full bg-blue-100 flex items-center justify-center flex-shrink-0">
+                    <span className="text-xs font-medium text-blue-600">{index + 1}</span>
+                  </div>
+                  <div className="flex-1 min-w-0">
+                    <div className="flex items-center space-x-2 mb-1">
+                      <span className="font-medium text-slate-800 text-sm">{vp.title}</span>
+                      <span className={`px-1.5 py-0.5 text-xs rounded ${cat.bg} ${cat.color}`}>
+                        {cat.label}
+                      </span>
+                    </div>
+                    <div className="text-xs text-slate-500 leading-relaxed">{vp.desc}</div>
+                  </div>
                 </div>
-                <div>
-                  <div className="font-medium text-slate-800 text-sm">{item.title}</div>
-                  <div className="text-xs text-slate-500 mt-0.5">{item.desc}</div>
-                </div>
-              </div>
-            ))}
+              )
+            })}
           </div>
         </div>
 
