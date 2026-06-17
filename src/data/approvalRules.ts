@@ -386,7 +386,6 @@ export function generateMockApprovalResult(serviceId: string): BlockingPoint[] {
   const results: BlockingPoint[] = []
 
   rule.checkPoints.forEach((cp) => {
-    // 随机生成一个结果，但确保至少有一个通过和一个不通过
     const randomIndex = Math.floor(Math.random() * cp.possibleResults.length)
     const result = cp.possibleResults[randomIndex]
 
@@ -396,6 +395,8 @@ export function generateMockApprovalResult(serviceId: string): BlockingPoint[] {
       reason: result.reason,
       solution: result.solution,
       level: result.level,
+      suggestionType: result.suggestionType,
+      source: 'detection',
     })
   })
 
@@ -404,34 +405,27 @@ export function generateMockApprovalResult(serviceId: string): BlockingPoint[] {
 
 // 根据核验点判断最终建议类型
 export function determineSuggestionType(blockingPoints: BlockingPoint[]): 'seconds' | 'correction' | 'manual' | 'reject' {
-  const hasCritical = blockingPoints.some((bp) => bp.level === 'critical')
-  const hasWarning = blockingPoints.some((bp) => bp.level === 'warning')
   const allPass = blockingPoints.every((bp) => bp.level === 'info')
+  if (allPass) return 'seconds'
 
-  if (allPass) {
-    return 'seconds'
-  }
+  const hasReject = blockingPoints.some((bp) => bp.suggestionType === 'reject')
+  const hasManual = blockingPoints.some((bp) => bp.suggestionType === 'manual')
+  const hasCorrection = blockingPoints.some((bp) => bp.suggestionType === 'correction')
 
-  if (hasCritical) {
-    // 检查是否所有 critical 都是 reject 类型
-    const criticalPoints = blockingPoints.filter((bp) => bp.level === 'critical')
-    const hasRejectCritical = criticalPoints.some((bp) => {
-      const rule = approvalRules.find((r) =>
-        r.checkPoints.some((cp) =>
-          cp.possibleResults.some((pr) => pr.reason === bp.reason && pr.suggestionType === 'reject')
-        )
-      )
-      return rule !== undefined
-    })
-    if (hasRejectCritical) {
-      return 'reject'
-    }
-    return 'manual'
-  }
-
-  if (hasWarning) {
-    return 'correction'
-  }
+  // 优先级：reject > manual > correction
+  if (hasReject) return 'reject'
+  if (hasManual) return 'manual'
+  if (hasCorrection) return 'correction'
 
   return 'manual'
+}
+
+// 获取可补正的卡点（用于补正告知单）
+export function getCorrectionBlockingPoints(blockingPoints: BlockingPoint[]): BlockingPoint[] {
+  return blockingPoints.filter((bp) => bp.suggestionType === 'correction')
+}
+
+// 获取需人工处理的卡点
+export function getManualBlockingPoints(blockingPoints: BlockingPoint[]): BlockingPoint[] {
+  return blockingPoints.filter((bp) => bp.suggestionType === 'manual')
 }

@@ -17,6 +17,7 @@ import {
   ClipboardList,
   AlertOctagon,
   ArrowLeftRight,
+  X,
 } from 'lucide-react'
 import { useAppContext } from '../context/AppContext'
 import {
@@ -31,24 +32,49 @@ type SuggestionType = 'seconds' | 'correction' | 'manual' | 'reject' | null
 function SmartSuggestions() {
   const {
     currentService,
+    blockingPoints,
     setBlockingPoints,
+    correctionSuggestions,
     setCorrectionSuggestions,
+    approvalResult,
     setApprovalResult,
     setActiveTab,
+    removeBlockingPoint,
   } = useAppContext()
 
   const goToReceipt = () => {
     setActiveTab('receipt')
   }
+
+  const goToMaterialVerification = () => {
+    setActiveTab('verification')
+  }
+
+  const goToExceptionHandling = () => {
+    setActiveTab('exception')
+  }
   const [expandedScenario, setExpandedScenario] = useState<string | null>(null)
   const [runSecondsApproval, setRunSecondsApproval] = useState(false)
-  const [blockingPoints, setLocalBlockingPoints] = useState<BlockingPoint[]>([])
   const [suggestionType, setSuggestionType] = useState<SuggestionType>(null)
 
-  // 切换事项时重置检测状态
+  // 根据全部卡点实时计算建议类型
+  useEffect(() => {
+    if (blockingPoints.length > 0) {
+      const type = determineSuggestionType(blockingPoints)
+      setSuggestionType(type)
+      // 同步更新补正建议（只取 correction 类型）
+      const suggestions = blockingPoints
+        .filter((bp) => bp.suggestionType === 'correction' && bp.solution)
+        .map((bp) => bp.solution)
+      setCorrectionSuggestions(suggestions)
+    } else if (!runSecondsApproval) {
+      setSuggestionType(null)
+    }
+  }, [blockingPoints, runSecondsApproval, setCorrectionSuggestions])
+
+  // 切换事项时重置秒批状态（但保留材料登记的卡点）
   useEffect(() => {
     setRunSecondsApproval(false)
-    setLocalBlockingPoints([])
     setSuggestionType(null)
   }, [currentService])
 
@@ -56,18 +82,19 @@ function SmartSuggestions() {
     if (!currentService) return
 
     // 根据事项ID生成对应的核验结果
-    const points = generateMockApprovalResult(currentService.id)
-    setLocalBlockingPoints(points)
-    setBlockingPoints(points)
+    const detectionPoints = generateMockApprovalResult(currentService.id)
 
-    // 确定建议类型
-    const type = determineSuggestionType(points)
+    // 合并：保留手工登记的，替换检测来源的（按 id 去重）
+    const manualPoints = blockingPoints.filter((bp) => bp.source === 'manual')
+    const merged = [...detectionPoints, ...manualPoints]
+    setBlockingPoints(merged)
+
+    const type = determineSuggestionType(merged)
     setSuggestionType(type)
     setApprovalResult(type)
 
-    // 提取补正建议
-    const suggestions = points
-      .filter((bp) => bp.level !== 'info' && bp.solution)
+    const suggestions = merged
+      .filter((bp) => bp.suggestionType === 'correction' && bp.solution)
       .map((bp) => bp.solution)
     setCorrectionSuggestions(suggestions)
 
@@ -77,14 +104,6 @@ function SmartSuggestions() {
   const handleGenerateCorrectionNotice = () => {
     setApprovalResult('correction')
     goToReceipt()
-  }
-
-  const goToExceptionHandling = () => {
-    setActiveTab('exception')
-  }
-
-  const goToMaterialVerification = () => {
-    setActiveTab('material')
   }
 
   const getLevelStyle = (level: string) => {
@@ -171,6 +190,8 @@ function SmartSuggestions() {
   const criticalCount = blockingPoints.filter((bp) => bp.level === 'critical').length
   const warningCount = blockingPoints.filter((bp) => bp.level === 'warning').length
   const passCount = blockingPoints.filter((bp) => bp.level === 'info').length
+  const manualCount = blockingPoints.filter((bp) => bp.suggestionType === 'manual').length
+  const correctionCount = blockingPoints.filter((bp) => bp.suggestionType === 'correction').length
   const suggestionInfo = getSuggestionTypeInfo(suggestionType)
 
   if (!currentService) {
@@ -277,7 +298,14 @@ function SmartSuggestions() {
               </div>
 
               {/* 卡点详情 */}
-              <h3 className="font-medium text-slate-800 mb-3">检测卡点明细</h3>
+              <h3 className="font-medium text-slate-800 mb-3 flex items-center justify-between">
+                <span>卡点明细（合并秒批检测 + 材料登记）</span>
+                {blockingPoints.length > 0 && (
+                  <span className="text-xs text-slate-500 font-normal">
+                    共 {blockingPoints.length} 项
+                  </span>
+                )}
+              </h3>
               <div className="space-y-3 max-h-64 overflow-y-auto">
                 {blockingPoints.map((bp) => {
                   const style = getLevelStyle(bp.level)
@@ -289,35 +317,69 @@ function SmartSuggestions() {
                     >
                       <div className="flex items-start space-x-3">
                         <Icon className={`w-5 h-5 ${style.iconColor} mt-0.5 flex-shrink-0`} />
-                        <div className="flex-1">
-                          <div className="flex items-center space-x-2 mb-1">
+                        <div className="flex-1 min-w-0">
+                          <div className="flex items-center flex-wrap gap-2 mb-1">
                             <span className="font-medium text-slate-800">{bp.field}</span>
                             <span className={`px-2 py-0.5 text-xs rounded ${style.iconColor} bg-white/60`}>
                               {style.label}
                             </span>
+                            <span className={`px-2 py-0.5 text-xs rounded ${
+                              bp.source === 'detection'
+                                ? 'text-purple-600 bg-purple-100'
+                                : 'text-blue-600 bg-blue-100'
+                            }`}>
+                              {bp.source === 'detection' ? '系统检测' : '人工登记'}
+                            </span>
+                            {bp.suggestionType === 'manual' && (
+                              <span className="px-2 py-0.5 text-xs rounded text-blue-600 bg-blue-50 border border-blue-200">
+                                需人工
+                              </span>
+                            )}
+                            {bp.suggestionType === 'correction' && (
+                              <span className="px-2 py-0.5 text-xs rounded text-amber-600 bg-amber-50 border border-amber-200">
+                                可补正
+                              </span>
+                            )}
+                            {bp.suggestionType === 'reject' && (
+                              <span className="px-2 py-0.5 text-xs rounded text-red-600 bg-red-50 border border-red-200">
+                                不受理
+                              </span>
+                            )}
                           </div>
                           <p className={`text-sm ${style.text}`}>{bp.reason}</p>
                           {bp.solution && (
                             <div className="mt-2 flex items-start space-x-2">
                               <ThumbsUp className="w-4 h-4 text-blue-500 flex-shrink-0 mt-0.5" />
                               <span className="text-sm text-blue-600">
-                                <span className="font-medium">补正建议：</span>
+                                <span className="font-medium">处理建议：</span>
                                 {bp.solution}
                               </span>
                             </div>
                           )}
                         </div>
+                        <button
+                          onClick={() => removeBlockingPoint(bp.id)}
+                          className="p-1 text-slate-400 hover:text-red-500 hover:bg-red-50 rounded transition-colors"
+                          title="移除"
+                        >
+                          <X className="w-4 h-4" />
+                        </button>
                       </div>
                     </div>
                   )
                 })}
+                {blockingPoints.length === 0 && (
+                  <div className="text-center py-8 text-slate-400 text-sm">
+                    暂无卡点
+                  </div>
+                )}
               </div>
             </div>
           )}
         </div>
 
-        {/* 补正建议（仅 correction 场景显示） */}
-        {runSecondsApproval && suggestionType === 'correction' && (
+        {/* 补正建议（只要有可补正的卡点就显示） */}
+        {correctionCount > 0 && (
           <div className="bg-white rounded-xl border border-slate-200 shadow-sm flex-1 overflow-hidden">
             <div className="p-4 border-b border-slate-100 bg-amber-50">
               <div className="flex items-center justify-between">
@@ -326,14 +388,14 @@ function SmartSuggestions() {
                   <span>补正建议（补正而非退件）</span>
                 </h3>
                 <span className="text-xs text-amber-600">
-                  共 {blockingPoints.filter((bp) => bp.level === 'warning').length} 项待补正
+                  共 {correctionCount} 项待补正
                 </span>
               </div>
             </div>
             <div className="p-4">
               <div className="space-y-3 max-h-48 overflow-y-auto">
                 {blockingPoints
-                  .filter((bp) => bp.level === 'warning' && bp.solution)
+                  .filter((bp) => bp.suggestionType === 'correction' && bp.solution)
                   .map((bp, index) => (
                     <div
                       key={bp.id}
@@ -366,13 +428,14 @@ function SmartSuggestions() {
           </div>
         )}
 
-        {/* 转人工指引（仅 manual 场景显示） */}
-        {runSecondsApproval && suggestionType === 'manual' && (
+        {/* 转人工指引（有需人工处理的卡点就显示） */}
+        {manualCount > 0 && (
           <div className="bg-white rounded-xl border border-slate-200 shadow-sm flex-1 overflow-hidden">
             <div className="p-4 border-b border-slate-100 bg-blue-50">
               <h3 className="font-medium text-slate-800 flex items-center space-x-2">
                 <Users className="w-4 h-4 text-blue-500" />
                 <span>转人工受理指引</span>
+                <span className="ml-1 text-xs text-blue-600">{manualCount}项</span>
               </h3>
             </div>
             <div className="p-4 space-y-3">
@@ -385,7 +448,7 @@ function SmartSuggestions() {
                     <div className="font-medium text-slate-800 mb-1">需人工核实的事项</div>
                     <div className="text-sm text-slate-500 space-y-1">
                       {blockingPoints
-                        .filter((bp) => bp.level === 'warning')
+                        .filter((bp) => bp.suggestionType === 'manual')
                         .map((bp) => (
                           <div key={bp.id}>• {bp.field}：{bp.reason}</div>
                         ))}
@@ -396,6 +459,7 @@ function SmartSuggestions() {
 
               <p className="text-sm text-slate-600">
                 该事项存在系统无法自动判定的情况，建议引导群众至人工窗口进行核验，或进行异常处置登记。
+                <span className="text-amber-600 font-medium">（此类问题不能通过补正解决）</span>
               </p>
 
               <div className="grid grid-cols-2 gap-3">

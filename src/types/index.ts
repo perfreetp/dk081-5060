@@ -46,6 +46,8 @@ export interface BlockingPoint {
   reason: string
   solution: string
   level: 'critical' | 'warning' | 'info'
+  suggestionType: 'correction' | 'manual' | 'reject' | 'info'
+  source: 'detection' | 'manual'
 }
 
 export interface InterventionRecord {

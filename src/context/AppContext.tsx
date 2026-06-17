@@ -8,7 +8,7 @@ import type {
   RejectReasonItem,
   ReceiptDraft,
 } from '../types'
-import { mockApplicant } from '../data/mockData'
+import { mockApplicant, mockServices } from '../data/mockData'
 
 interface AppContextType {
   currentService: ServiceItem | null
@@ -48,6 +48,7 @@ const AppContext = createContext<AppContextType | undefined>(undefined)
 
 const FAVORITES_STORAGE_KEY = 'gov_service_favorites'
 const DRAFT_STORAGE_PREFIX = 'gov_service_draft_'
+const CURRENT_SERVICE_KEY = 'gov_service_current_service_id'
 
 function getDefaultReceiptDraft(): ReceiptDraft {
   return {
@@ -61,7 +62,33 @@ function getDefaultReceiptDraft(): ReceiptDraft {
 }
 
 export function AppProvider({ children }: { children: ReactNode }) {
-  const [currentService, setCurrentService] = useState<ServiceItem | null>(null)
+  // 初始化时从 localStorage 读取最后选中的事项
+  const [currentServiceId, setCurrentServiceId] = useState<string | null>(() => {
+    return localStorage.getItem(CURRENT_SERVICE_KEY)
+  })
+
+  // 根据 serviceId 从 mockServices 中找到完整的事项对象
+  const currentService = currentServiceId
+    ? mockServices.find((s) => s.id === currentServiceId) || null
+    : null
+
+  const setCurrentService = (service: ServiceItem | null) => {
+    if (service) {
+      setCurrentServiceId(service.id)
+    } else {
+      setCurrentServiceId(null)
+    }
+  }
+
+  // 保存当前事项ID到 localStorage
+  useEffect(() => {
+    if (currentServiceId) {
+      localStorage.setItem(CURRENT_SERVICE_KEY, currentServiceId)
+    } else {
+      localStorage.removeItem(CURRENT_SERVICE_KEY)
+    }
+  }, [currentServiceId])
+
   const [applicant, setApplicant] = useState<Applicant | null>(mockApplicant)
   const [favorites, setFavorites] = useState<string[]>([])
   const [blockingPoints, setBlockingPoints] = useState<BlockingPoint[]>([])
@@ -70,7 +97,6 @@ export function AppProvider({ children }: { children: ReactNode }) {
   const [activeTab, setActiveTab] = useState<string>('acceptance')
 
   const [materials, setMaterials] = useState<MaterialWithStatus[]>([])
-
   const [receiptDraft, setReceiptDraft] = useState<ReceiptDraft | null>(null)
 
   // 从 localStorage 加载收藏
@@ -90,56 +116,86 @@ export function AppProvider({ children }: { children: ReactNode }) {
     localStorage.setItem(FAVORITES_STORAGE_KEY, JSON.stringify(favorites))
   }, [favorites])
 
-  // 切换事项时：
-  // 1. 先暂存当前事项的草稿（如果有的话）
-  // 2. 加载新事项的草稿（如果之前暂存过）
-  // 3. 重置该事项特有的状态
+  // 切换事项时加载对应草稿
   useEffect(() => {
-    const prevServiceId = (() => {
-      // 尝试从当前状态推断旧的事项 ID
-      if (receiptDraft) return undefined
-      return undefined
-    })()
+    if (!currentService) {
+      setReceiptDraft(null)
+      return
+    }
 
-    // 清空当前事项的相关状态
-    setBlockingPoints([])
-    setCorrectionSuggestions([])
-    setApprovalResult(null)
-    setMaterials([])
+    const storageKey = DRAFT_STORAGE_PREFIX + currentService.id
+    const stored = localStorage.getItem(storageKey)
 
-    if (currentService) {
-      // 加载该事项的草稿
-      const storageKey = DRAFT_STORAGE_PREFIX + currentService.id
-      const storedDraft = localStorage.getItem(storageKey)
-      if (storedDraft) {
-        try {
-          const parsed = JSON.parse(storedDraft)
-          setReceiptDraft(parsed)
-          if (parsed.materials) {
-            setMaterials(parsed.materials)
-          }
-          if (parsed.blockingPoints) {
-            setBlockingPoints(parsed.blockingPoints)
-          }
-          if (parsed.approvalResult) {
-            setApprovalResult(parsed.approvalResult)
-          }
-          if (parsed.correctionSuggestions) {
-            setCorrectionSuggestions(parsed.correctionSuggestions)
-          }
-        } catch (e) {
-          console.error('Failed to load draft:', e)
+    if (stored) {
+      try {
+        const parsed = JSON.parse(stored)
+
+        // 恢复各状态
+        if (parsed.receiptDraft) {
+          setReceiptDraft(parsed.receiptDraft)
+        } else {
           setReceiptDraft(getDefaultReceiptDraft())
         }
-      } else {
+
+        if (Array.isArray(parsed.materials) && parsed.materials.length > 0) {
+          setMaterials(parsed.materials)
+        } else {
+          // 从当前事项初始化材料列表
+          setMaterials(
+            currentService.requiredMaterials.map((m) => ({
+              ...m,
+              status: 'pending',
+            }))
+          )
+        }
+
+        if (Array.isArray(parsed.blockingPoints)) {
+          setBlockingPoints(parsed.blockingPoints)
+        } else {
+          setBlockingPoints([])
+        }
+
+        if (parsed.approvalResult) {
+          setApprovalResult(parsed.approvalResult)
+        } else {
+          setApprovalResult(null)
+        }
+
+        if (Array.isArray(parsed.correctionSuggestions)) {
+          setCorrectionSuggestions(parsed.correctionSuggestions)
+        } else {
+          setCorrectionSuggestions([])
+        }
+      } catch (e) {
+        console.error('Failed to load draft:', e)
         setReceiptDraft(getDefaultReceiptDraft())
+        // 初始化默认材料列表
+        setMaterials(
+          currentService.requiredMaterials.map((m) => ({
+            ...m,
+            status: 'pending',
+          }))
+        )
+        setBlockingPoints([])
+        setApprovalResult(null)
+        setCorrectionSuggestions([])
       }
     } else {
-      setReceiptDraft(null)
+      // 新事项，初始化
+      setReceiptDraft(getDefaultReceiptDraft())
+      setMaterials(
+        currentService.requiredMaterials.map((m) => ({
+          ...m,
+          status: 'pending',
+        }))
+      )
+      setBlockingPoints([])
+      setApprovalResult(null)
+      setCorrectionSuggestions([])
     }
   }, [currentService])
 
-  // 当有当前事项时，自动暂存草稿
+  // 自动保存草稿
   useEffect(() => {
     if (!currentService) return
 
@@ -158,7 +214,14 @@ export function AppProvider({ children }: { children: ReactNode }) {
     } catch (e) {
       console.error('Failed to save draft:', e)
     }
-  }, [currentService, receiptDraft, materials, blockingPoints, approvalResult, correctionSuggestions])
+  }, [
+    currentService,
+    receiptDraft,
+    materials,
+    blockingPoints,
+    approvalResult,
+    correctionSuggestions,
+  ])
 
   const toggleFavorite = (serviceId: string) => {
     setFavorites((prev) =>

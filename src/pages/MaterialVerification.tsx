@@ -70,6 +70,8 @@ function MaterialVerification() {
       reason: '材料缺失，群众未提交该项材料',
       solution: `请补充提交「${materialName}」`,
       level: 'warning',
+      suggestionType: 'correction',
+      source: 'manual',
     }
     addBlockingPoint(newPoint)
   }
@@ -78,6 +80,7 @@ function MaterialVerification() {
     if (!problemText.trim()) return
 
     const level = problemLevel
+    const suggestionType = problemLevel === 'warning' ? 'correction' : 'reject'
     const newPoint: BlockingPoint = {
       id: `mat-${materialId}-${Date.now()}`,
       field: materialName,
@@ -87,6 +90,8 @@ function MaterialVerification() {
           ? `请针对「${materialName}」补正：${problemText}`
           : `「${materialName}」存在问题：${problemText}，建议不予受理或转人工`,
       level,
+      suggestionType,
+      source: 'manual',
     }
     addBlockingPoint(newPoint)
 
